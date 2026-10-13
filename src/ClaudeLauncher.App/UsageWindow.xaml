@@ -1,0 +1,246 @@
+<Window x:Class="ClaudeLauncher.App.UsageWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="用量统计 · 会话管家" Height="780" Width="1080" MinWidth="760" MinHeight="540"
+        Icon="app.ico"
+        WindowStartupLocation="Manual"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource RaisedBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="14,10,14,11"/>
+            <Setter Property="Margin" Value="0,0,10,0"/>
+        </Style>
+
+        <Style x:Key="CardLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style x:Key="CardValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,2,0,1"/>
+        </Style>
+
+        <Style x:Key="CardNote" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource FaintBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+
+        <!-- One day (or month): Claude below, Codex and Gemini stacked on top, all to the same scale. -->
+        <DataTemplate x:Key="BarTemplate">
+            <Grid Margin="1,0" Background="Transparent" ToolTip="{Binding Tip}">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="112"/>
+                    <RowDefinition Height="18"/>
+                </Grid.RowDefinitions>
+                <StackPanel VerticalAlignment="Bottom">
+                    <Border Height="{Binding GeminiHeight}" Background="{DynamicResource GeminiBrush}"/>
+                    <Border Height="{Binding CodexHeight}" Background="{DynamicResource CodexBrush}"/>
+                    <Border Height="{Binding ClaudeHeight}" Background="{DynamicResource ClaudeBrush}"/>
+                </StackPanel>
+                <!-- Wider than its bar when the bars are thin: the margins give it room past the bar's edges. -->
+                <TextBlock Grid.Row="1" Text="{Binding Label}" FontSize="10.5" Foreground="{DynamicResource FaintBrush}"
+                           HorizontalAlignment="Center" TextAlignment="Center" Margin="-40,4,-40,0"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- A ranked line: name, amount, and a bar for its share of the largest. -->
+        <DataTemplate x:Key="RankTemplate">
+            <Grid Margin="0,0,4,10" Background="Transparent" ToolTip="{Binding Tip}" Cursor="{Binding Cursor}"
+                  MouseLeftButtonDown="Rank_MouseDown">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Margin="0,0,10,0" TextTrimming="CharacterEllipsis">
+                    <Run Text="{Binding Name, Mode=OneWay}"/><Run Text="{Binding Note, Mode=OneWay}" FontSize="11.5"
+                                                               Foreground="{DynamicResource FaintBrush}"/>
+                </TextBlock>
+                <TextBlock Grid.Column="1" Text="{Binding Amount}" FontWeight="SemiBold"/>
+                <Grid Grid.Row="1" Grid.ColumnSpan="2" Height="4" Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding Bar}"/>
+                        <ColumnDefinition Width="{Binding Rest}"/>
+                    </Grid.ColumnDefinitions>
+                    <Border CornerRadius="2" Background="{Binding Brush}"/>
+                </Grid>
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="20,16,20,14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ============================================== range, app, refresh -->
+        <DockPanel Margin="0,0,0,14">
+            <Border DockPanel.Dock="Left" Background="{StaticResource RaisedBrush}" CornerRadius="6" Padding="3"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="RangeToday" Style="{StaticResource SegmentButton}" GroupName="Range" Tag="1"
+                                 Content="今天" Checked="Range_Checked"/>
+                    <RadioButton x:Name="RangeWeek" Style="{StaticResource SegmentButton}" GroupName="Range" Tag="7"
+                                 Content="最近 7 天" Checked="Range_Checked"/>
+                    <RadioButton x:Name="RangeMonth" Style="{StaticResource SegmentButton}" GroupName="Range" Tag="30"
+                                 Content="最近 30 天" Checked="Range_Checked"/>
+                    <RadioButton x:Name="RangeQuarter" Style="{StaticResource SegmentButton}" GroupName="Range" Tag="90"
+                                 Content="最近 90 天" Checked="Range_Checked"/>
+                    <RadioButton x:Name="RangeAll" Style="{StaticResource SegmentButton}" GroupName="Range" Tag="0"
+                                 Content="全部" Checked="Range_Checked"/>
+                </StackPanel>
+            </Border>
+            <Border DockPanel.Dock="Left" Margin="12,0,0,0" Background="{StaticResource RaisedBrush}" CornerRadius="6"
+                    Padding="3" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="AppBoth" Style="{StaticResource SegmentButton}" GroupName="App" Tag=""
+                                 Content="全部应用" Checked="App_Checked"/>
+                    <RadioButton x:Name="AppClaude" Style="{StaticResource SegmentButton}" GroupName="App" Tag="Claude"
+                                 Content="Claude" Checked="App_Checked"/>
+                    <RadioButton x:Name="AppCodex" Style="{StaticResource SegmentButton}" GroupName="App" Tag="Codex"
+                                 Content="Codex" Checked="App_Checked"/>
+                    <RadioButton x:Name="AppGemini" Style="{StaticResource SegmentButton}" GroupName="App" Tag="Gemini"
+                                 Content="Gemini" Checked="App_Checked"/>
+                </StackPanel>
+            </Border>
+            <Button x:Name="RefreshButton" DockPanel.Dock="Right" Padding="12,6" Click="Refresh_Click"
+                    AutomationProperties.Name="刷新用量" ToolTip="读取上次之后新写入记录的用量">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE72C;" Margin="0,0,7,0"/>
+                    <TextBlock Text="刷新"/>
+                </StackPanel>
+            </Button>
+            <TextBlock x:Name="StatusText" Style="{StaticResource Muted}" VerticalAlignment="Center" Margin="16,0,12,0"
+                       TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"/>
+        </DockPanel>
+
+        <!-- ========================================================= totals -->
+        <UniformGrid Grid.Row="1" Columns="5" Margin="0,0,-10,14">
+            <Border Style="{StaticResource Card}" ToolTip="输入、缓存读取、缓存写入、输出加在一起">
+                <StackPanel>
+                    <TextBlock Text="合计" Style="{StaticResource CardLabel}"/>
+                    <TextBlock x:Name="TotalValue" Style="{StaticResource CardValue}" Text="—"/>
+                    <TextBlock x:Name="TotalNote" Style="{StaticResource CardNote}"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" ToolTip="每次调用里没有命中缓存、按全价读入的部分">
+                <StackPanel>
+                    <TextBlock Text="输入" Style="{StaticResource CardLabel}"/>
+                    <TextBlock x:Name="InputValue" Style="{StaticResource CardValue}" Text="—"/>
+                    <TextBlock Text="未命中缓存的部分" Style="{StaticResource CardNote}"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" ToolTip="每次调用都会把已有的上下文从缓存里重读一遍，所以通常最大">
+                <StackPanel>
+                    <TextBlock Text="缓存读取" Style="{StaticResource CardLabel}"/>
+                    <TextBlock x:Name="CacheReadValue" Style="{StaticResource CardValue}" Text="—"/>
+                    <TextBlock x:Name="CacheReadNote" Style="{StaticResource CardNote}"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" ToolTip="新写入缓存的上下文（Claude 记录这一项；Codex 一般为 0）">
+                <StackPanel>
+                    <TextBlock Text="缓存写入" Style="{StaticResource CardLabel}"/>
+                    <TextBlock x:Name="CacheWriteValue" Style="{StaticResource CardValue}" Text="—"/>
+                    <TextBlock Text="新写入缓存的上下文" Style="{StaticResource CardNote}"/>
+                </StackPanel>
+            </Border>
+            <Border Style="{StaticResource Card}" ToolTip="模型写出的内容，含思考 / 推理">
+                <StackPanel>
+                    <TextBlock Text="输出" Style="{StaticResource CardLabel}"/>
+                    <TextBlock x:Name="OutputValue" Style="{StaticResource CardValue}" Text="—"/>
+                    <TextBlock Text="含思考 / 推理" Style="{StaticResource CardNote}"/>
+                </StackPanel>
+            </Border>
+        </UniformGrid>
+
+        <!-- ========================================================== chart -->
+        <Border x:Name="ChartSection" Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,14">
+            <DockPanel>
+                <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                        <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ClaudeBrush}" Margin="0,0,5,0"/>
+                        <TextBlock Text="Claude" FontSize="12" Margin="0,0,14,0"/>
+                        <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource CodexBrush}" Margin="0,0,5,0"/>
+                        <TextBlock Text="Codex" FontSize="12" Margin="0,0,14,0"/>
+                        <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource GeminiBrush}" Margin="0,0,5,0"/>
+                        <TextBlock Text="Gemini" FontSize="12"/>
+                    </StackPanel>
+                    <TextBlock x:Name="ChartTitle" DockPanel.Dock="Left" Text="按天" FontWeight="SemiBold"/>
+                    <TextBlock x:Name="ChartPeak" Style="{StaticResource Muted}" FontSize="12" Margin="12,1,0,0"
+                               TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+                <ItemsControl x:Name="Chart" ItemTemplate="{StaticResource BarTemplate}" Focusable="False"
+                              AutomationProperties.Name="每天的用量">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <UniformGrid Rows="1"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                </ItemsControl>
+            </DockPanel>
+        </Border>
+
+        <!-- ========================================================== lists -->
+        <Grid Grid.Row="3" Margin="0,0,-10,0">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="1.35*"/>
+            </Grid.ColumnDefinitions>
+            <Border Style="{StaticResource Card}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="按模型" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                        <ItemsControl x:Name="ModelList" ItemTemplate="{StaticResource RankTemplate}" Focusable="False"
+                                      AutomationProperties.Name="按模型"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+            <Border Grid.Column="1" Style="{StaticResource Card}">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Top" Text="按工作目录" FontWeight="SemiBold" Margin="0,0,0,10"/>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                        <ItemsControl x:Name="ProjectList" ItemTemplate="{StaticResource RankTemplate}" Focusable="False"
+                                      AutomationProperties.Name="按工作目录"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+            <Border Grid.Column="2" Style="{StaticResource Card}">
+                <DockPanel>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                        <TextBlock DockPanel.Dock="Right" Text="双击在列表中定位" Style="{StaticResource CardNote}"
+                                   VerticalAlignment="Bottom"/>
+                        <TextBlock Text="用得最多的会话" FontWeight="SemiBold"/>
+                    </DockPanel>
+                    <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
+                        <ItemsControl x:Name="ConversationList" ItemTemplate="{StaticResource RankTemplate}" Focusable="False"
+                                      AutomationProperties.Name="用得最多的会话"/>
+                    </ScrollViewer>
+                </DockPanel>
+            </Border>
+            <TextBlock x:Name="EmptyText" Grid.ColumnSpan="3" HorizontalAlignment="Center" VerticalAlignment="Center"
+                       Style="{StaticResource Muted}" Visibility="Collapsed" Text="这段时间里没有用量记录"/>
+        </Grid>
+
+        <TextBlock Grid.Row="4" Margin="2,12,0,0" TextWrapping="Wrap" FontSize="12" LineHeight="18"
+                   Foreground="{StaticResource FaintBrush}"
+                   Text="读自本机的对话记录：Claude 每次回复里的 usage，Codex 每次回复后的 token_count，Gemini CLI 每次回复记下的 tokens（思考算作输出）。子代理、子任务算进它所属的会话；分叉和续接时复制过来的记录只算一次。每次调用都会把上下文重读一遍（多半记作缓存读取），所以缓存读取通常最大。只统计 token，不折算费用。"/>
+    </Grid>
+</Window>

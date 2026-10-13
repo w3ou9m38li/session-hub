@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/ClaudeLauncher.App/ClaudeLauncher.App.csproj" />
+    <Project Path="src/ClaudeLauncher.Core/ClaudeLauncher.Core.csproj" />
+    <Project Path="src/ClaudeLauncher.Infrastructure/ClaudeLauncher.Infrastructure.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/ClaudeLauncher.IntegrationTests/ClaudeLauncher.IntegrationTests.csproj" />
+    <Project Path="tests/ClaudeLauncher.UnitTests/ClaudeLauncher.UnitTests.csproj" />
+  </Folder>
+</Solution>

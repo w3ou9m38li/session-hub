@@ -1,0 +1,38 @@
+<Window x:Class="ClaudeLauncher.App.HotkeyDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="全局快捷键" Width="440" SizeToContent="Height"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <StackPanel Margin="18,16,18,14">
+        <TextBlock TextWrapping="Wrap" LineHeight="19" Margin="0,0,0,12"
+                   Text="按下想用的组合键：要两个修饰键，其中有 Ctrl、Alt 或 Win（如 Ctrl+Alt+J、Alt+Shift+Q），免得抢走各个程序里常用的快捷键。单独按 Esc 取消、Enter 保存。"/>
+
+        <!-- The combination as pressed; the dialog catches every key while it is open. -->
+        <Border CornerRadius="6" Padding="12,14" BorderThickness="1"
+                Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource ControlLineBrush}">
+            <TextBlock x:Name="ComboText" FontSize="20" FontWeight="SemiBold" HorizontalAlignment="Center"
+                       AutomationProperties.Name="按下的组合键"/>
+        </Border>
+
+        <DockPanel Margin="2,8,0,0">
+            <TextBlock x:Name="StateGlyph" DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="12"
+                       Margin="0,1,6,0" VerticalAlignment="Top"/>
+            <TextBlock x:Name="StateText" FontSize="12" TextWrapping="Wrap" AutomationProperties.LiveSetting="Polite"/>
+        </DockPanel>
+
+        <DockPanel Margin="0,16,0,0">
+            <Button DockPanel.Dock="Left" Style="{StaticResource LinkButton}" VerticalAlignment="Center"
+                    Content="恢复自动" Click="Automatic_Click" Focusable="False"
+                    ToolTip="依次试 Ctrl+Alt+Space、Alt+Shift+Space、Ctrl+Alt+K，用第一个没被占用的"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button x:Name="SaveButton" Content="保存" MinWidth="88" Click="Save_Click" IsEnabled="False"
+                        Style="{StaticResource ClaudeButton}" Focusable="False"/>
+                <Button Content="取消" MinWidth="88" Margin="8,0,0,0" Click="Cancel_Click" Focusable="False"/>
+            </StackPanel>
+        </DockPanel>
+    </StackPanel>
+</Window>

@@ -1,0 +1,70 @@
+<UserControl x:Class="ClaudeLauncher.App.SearchHistoryPanel"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             Foreground="{DynamicResource TextBrush}"
+             FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+             UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <UserControl.Resources>
+        <!-- A whole row that acts: the pointer and a screen reader reach it; the keyboard stays in the search box. -->
+        <Style x:Key="RowButton" TargetType="Button">
+            <Setter Property="Foreground" Value="{DynamicResource TextBrush}"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Button">
+                        <Border Background="Transparent">
+                            <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"/>
+                        </Border>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+    </UserControl.Resources>
+
+    <Border Background="{DynamicResource PopupBrush}" BorderBrush="{DynamicResource ControlLineBrush}"
+            BorderThickness="1" CornerRadius="6" Padding="4,2,4,6">
+        <DockPanel>
+            <Grid DockPanel.Dock="Top" Margin="9,5,8,5">
+                <TextBlock Text="最近的搜索" Foreground="{DynamicResource FaintBrush}" FontSize="12" VerticalAlignment="Center"/>
+                <Button x:Name="ClearAllButton" Style="{StaticResource LinkButton}" Content="全部清除" Focusable="False"
+                        HorizontalAlignment="Right" Click="ClearAll_Click"
+                        ToolTip="删掉这里记下的全部搜索（状态栏里可以撤销）" AutomationProperties.Name="清除全部搜索历史"/>
+            </Grid>
+
+            <TextBlock DockPanel.Dock="Bottom" Margin="9,7,8,0" FontSize="11.5" Foreground="{DynamicResource FaintBrush}"
+                       TextTrimming="CharacterEllipsis"
+                       Text="↑↓ 选择　Enter 搜索　Delete 删掉这一条　Esc 关闭"/>
+
+            <ItemsControl x:Name="EntryList" Focusable="False">
+                <ItemsControl.ItemTemplate>
+                    <DataTemplate>
+                        <Grid MouseEnter="Row_MouseEnter">
+                            <Border x:Name="Fill" CornerRadius="4" Background="Transparent"/>
+                            <Button Style="{StaticResource RowButton}" Click="Pick_Click"
+                                    AutomationProperties.Name="{Binding Text}" ToolTip="{Binding Hint}">
+                                <DockPanel Margin="9,6,34,6">
+                                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" Text="&#xE81C;"
+                                               FontSize="12" Foreground="{DynamicResource FaintBrush}" Margin="0,1,10,0"/>
+                                    <TextBlock Text="{Binding Text}" TextTrimming="CharacterEllipsis" VerticalAlignment="Center"/>
+                                </DockPanel>
+                            </Button>
+                            <Button x:Name="Remove" Style="{StaticResource IconButton}" Width="24" Height="24" FontSize="10"
+                                    Content="&#xE711;" HorizontalAlignment="Right" Margin="0,0,4,0" Focusable="False"
+                                    Visibility="Hidden" Click="Remove_Click" ToolTip="从搜索历史里删掉（Delete）"
+                                    AutomationProperties.Name="{Binding RemoveName}"/>
+                        </Grid>
+                        <DataTemplate.Triggers>
+                            <DataTrigger Binding="{Binding IsHighlighted}" Value="True">
+                                <Setter TargetName="Fill" Property="Background" Value="{DynamicResource SelectionBrush}"/>
+                                <Setter TargetName="Remove" Property="Visibility" Value="Visible"/>
+                            </DataTrigger>
+                        </DataTemplate.Triggers>
+                    </DataTemplate>
+                </ItemsControl.ItemTemplate>
+            </ItemsControl>
+        </DockPanel>
+    </Border>
+</UserControl>
