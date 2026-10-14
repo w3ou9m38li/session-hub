@@ -26,15 +26,15 @@ public static class TranscriptLocator
     }
 
     /// <summary>
-    /// What to read for a row: its transcript as found — unpacked into this tool's copy when it
-    /// is compressed — or, when the app no longer has it, the copy kept of it.
+    /// What to read for a row: its transcript as found — this tool's copy of it when the app keeps
+    /// it compressed — or, when the app no longer has it, the copy kept of it.
     /// </summary>
     private static string? Readable(SessionMetadata row, string? found)
     {
         if (Archive is not { } archive || TranscriptArchive.IdentityOf(row) is not { } id)
             return TranscriptFiles.IsCompressed(found) ? null : found;
         if (found is not null && !TranscriptFiles.IsCompressed(found)) return found;
-        if (found is not null) return archive.Unpacked(found, id.Family, id.Conversation);
+        if (found is not null) return archive.Readable(found, id.Family, id.Conversation);
         return archive.CopyOf(id.Family, id.Conversation);
     }
 
@@ -44,7 +44,9 @@ public static class TranscriptLocator
             return FindCodex(row, codex ?? CodexPaths.Discover());
 
         if (row.Key.Backend == ConversationKey.Gemini) return FindGemini(row);
-        if (row.Key.Backend == ConversationKey.GeminiWeb) return FindImported(row);
+        if (row.Key.Backend == ConversationKey.DeepSeek) return FindDsh(row);
+        // Any other source but Claude's: the file its sync recorded.
+        if (!ConversationKey.IsClaude(row.Key.Backend)) return FindRecorded(row);
 
         if (string.IsNullOrWhiteSpace(claudeConfigDir)) return null;
 
@@ -106,8 +108,10 @@ public static class TranscriptLocator
             }
             else if (row.Key.Backend == ConversationKey.Gemini)
                 path = FindGemini(row);
-            else if (row.Key.Backend == ConversationKey.GeminiWeb)
-                path = FindImported(row);
+            else if (row.Key.Backend == ConversationKey.DeepSeek)
+                path = FindDsh(row);
+            else if (!ConversationKey.IsClaude(row.Key.Backend))
+                path = FindRecorded(row);
             else if (StemOf(row) is { } stem && !string.IsNullOrWhiteSpace(claudeConfigDir))
             {
                 if ((claude ??= ClaudeTranscripts(claudeConfigDir)).TryGetValue(stem, out var hit)) path = hit.Path;
@@ -215,24 +219,40 @@ public static class TranscriptLocator
         return null;
     }
 
-    /// <summary>An imported conversation's file: the one the sync recorded, in this tool's own store.</summary>
-    private static string? FindImported(SessionMetadata row) =>
+    /// <summary>
+    /// A DeepSeek Harness session's log: the one the sync recorded, else the newest log in the
+    /// folder named after the session (its id, <c>session-&lt;uuid&gt;</c>) under any workspace of
+    /// its home — dsh upgrades a session to a new log generation beside the old one.
+    /// </summary>
+    private static string? FindDsh(SessionMetadata row)
+    {
+        if (row.NativeOpenRef is { Length: > 0 } recorded && File.Exists(recorded)) return recorded;
+        var id = row.Key.NativeSessionId;
+        var sessions = Path.Combine(row.Key.AccountContextId, "sessions");
+        if (string.IsNullOrWhiteSpace(id) || id.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !Directory.Exists(sessions))
+            return null;
+        try
+        {
+            foreach (var workspace in Directory.EnumerateDirectories(sessions))
+            {
+                var folder = Path.Combine(workspace, id);
+                if (Directory.Exists(folder) && DshPaths.LogOf(folder) is { } log) return log;
+            }
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException) { }
+        return null;
+    }
+
+    /// <summary>
+    /// The file a source's sync recorded for the row — an imported conversation's, in this tool's
+    /// own store, or that of a source that names its file in its rows and has no other way to look.
+    /// </summary>
+    private static string? FindRecorded(SessionMetadata row) =>
         row.NativeOpenRef is { Length: > 0 } recorded && File.Exists(recorded) ? recorded : null;
 
     /// <summary>Why a row cannot be displayed, for the UI to show verbatim.</summary>
-    public static string ExplainMissing(SessionMetadata row) => row.Key.Backend switch
-    {
-        ConversationKey.DesktopCode when string.IsNullOrWhiteSpace(row.CliSessionId) =>
-            "这条桌面会话没有关联的 CLI transcript，磁盘上没有可显示的正文。",
-        ConversationKey.Codex =>
-            "找不到这条 Codex 任务的 rollout 文件——可能已被 Codex 清理或移动到其他 CODEX_HOME。",
-        ConversationKey.Gemini =>
-            "找不到这条 Gemini CLI 会话的记录文件——可能已被删除（~\\.gemini\\tmp 下的 chats 文件夹）。",
-        ConversationKey.GeminiWeb =>
-            "找不到这段导入的 Gemini 网页对话——导入的记录可能已被移除；重新导入 Google Takeout 的导出即可。",
-        ConversationKey.Chat or ConversationKey.Cowork =>
-            "该来源没有本地 transcript。",
-        _ =>
-            "找不到对应的 transcript 文件——可能已被清理，或它属于另一个配置目录。",
-    };
+    public static string ExplainMissing(SessionMetadata row) =>
+        row.Key.Backend == ConversationKey.DesktopCode && string.IsNullOrWhiteSpace(row.CliSessionId)
+            ? "这条桌面会话没有关联的 CLI transcript，磁盘上没有可显示的正文。"
+            : Sources.Of(row.Key.Backend)?.MissingText ?? "找不到对应的 transcript 文件——可能已被清理，或它属于另一个配置目录。";
 }

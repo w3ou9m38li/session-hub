@@ -86,6 +86,15 @@
         <TextBlock x:Name="StatusLine" Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="19"
                    Foreground="{StaticResource MutedBrush}"/>
 
+        <Border x:Name="FoundPanel" Margin="0,12,0,0" Padding="12,9,12,10" CornerRadius="6" BorderThickness="1"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}" Visibility="Collapsed">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="导入这一份" MinWidth="96" Margin="12,0,0,0" VerticalAlignment="Center"
+                        Click="ImportFound_Click" ToolTip="导入下载文件夹里找到的这份导出"/>
+                <TextBlock x:Name="FoundText" TextWrapping="Wrap" LineHeight="19" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
         <DockPanel Margin="0,16,0,0">
             <Button x:Name="RemoveButton" DockPanel.Dock="Left" Style="{StaticResource LinkButton}" VerticalAlignment="Center"
                     Content="移除已导入的记录…" Visibility="Collapsed" Click="Remove_Click"

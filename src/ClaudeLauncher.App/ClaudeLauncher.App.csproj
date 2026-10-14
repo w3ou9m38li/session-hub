@@ -10,7 +10,7 @@
     <Product>Session Hub for Claude and ChatGPT</Product>
     <!-- Third-party tool. Not an Anthropic or OpenAI product and never presented as one. -->
     <Company>Independent third-party launcher</Company>
-    <Version>0.18.0</Version>
+    <Version>0.23.0</Version>
     <!-- Deliberately not Claude's mark: this is a third-party tool and must not look official. -->
     <ApplicationIcon>app.ico</ApplicationIcon>
     <!-- Per-monitor DPI, Windows 10/11 compatibility, long paths. -->

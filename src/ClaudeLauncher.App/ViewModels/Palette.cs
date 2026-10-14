@@ -1,5 +1,6 @@
 using System.Windows;
 using System.Windows.Media;
+using ClaudeLauncher.Core.Contracts;
 
 namespace ClaudeLauncher.App.ViewModels;
 
@@ -18,19 +19,31 @@ internal static class Palette
     public static Brush Warn { get; private set; } = Frozen(0xE0, 0xA0, 0x62);
     public static Brush Error { get; private set; } = Frozen(0xE8, 0x78, 0x7A);
 
-    /// <summary>Claude's orange and ChatGPT's green, as text on the list.</summary>
-    public static Brush ClaudeText { get; private set; } = Frozen(0xE0, 0x8B, 0x62);
-    public static Brush CodexText { get; private set; } = Frozen(0x6F, 0xBF, 0xA8);
-    public static Brush GeminiText { get; private set; } = Frozen(0x95, 0xA8, 0xF0);
-
-    /// <summary>The same two as badge backgrounds under white text.</summary>
-    public static Brush ClaudeFill { get; private set; } = Frozen(0xA8, 0x55, 0x39);
-    public static Brush CodexFill { get; private set; } = Frozen(0x35, 0x6E, 0x5F);
-    public static Brush GeminiFill { get; private set; } = Frozen(0x4A, 0x5C, 0xB0);
-
     /// <summary>The two sides of a conversation in the reader.</summary>
     public static Brush UserBubble { get; private set; } = Frozen(0x33, 0x29, 0x24);
     public static Brush AssistantBubble { get; private set; } = Frozen(0x29, 0x29, 0x2E);
+
+    /// <summary>
+    /// Each app family's colour, from the theme's <c>&lt;Family&gt;TextBrush</c> (as text on the
+    /// list), <c>&lt;Family&gt;FillBrush</c> (a badge under white text) and <c>&lt;Family&gt;Brush</c>
+    /// (a bar of the usage chart). A family the theme has no colour for reads in the text colour.
+    /// </summary>
+    private static Dictionary<AppFamily, (Brush Text, Brush Fill, Brush Bar)> _families = new()
+    {
+        [AppFamily.Claude] = (Frozen(0xE0, 0x8B, 0x62), Frozen(0xA8, 0x55, 0x39), Frozen(0xC9, 0x64, 0x42)),
+        [AppFamily.Codex] = (Frozen(0x6F, 0xBF, 0xA8), Frozen(0x35, 0x6E, 0x5F), Frozen(0x3F, 0x7F, 0x6E)),
+        [AppFamily.Gemini] = (Frozen(0x95, 0xA8, 0xF0), Frozen(0x4A, 0x5C, 0xB0), Frozen(0x5B, 0x6F, 0xC9)),
+        [AppFamily.DeepSeek] = (Frozen(0xC3, 0xA3, 0xF0), Frozen(0x6E, 0x4A, 0xA8), Frozen(0x8A, 0x5C, 0xC2)),
+    };
+
+    public static Brush TextOf(AppFamily family) => _families.TryGetValue(family, out var c) ? c.Text : Text;
+
+    public static Brush FillOf(AppFamily family) => _families.TryGetValue(family, out var c) ? c.Fill : Muted;
+
+    public static Brush BarOf(AppFamily family) => _families.TryGetValue(family, out var c) ? c.Bar : Muted;
+
+    /// <summary>Claude's orange: also what marks the user's side in the reader and the previews.</summary>
+    public static Brush ClaudeText => TextOf(AppFamily.Claude);
 
     /// <summary>Takes the chosen theme's colours. Called on the UI thread once the theme is applied.</summary>
     public static void Load(ResourceDictionary theme)
@@ -42,14 +55,18 @@ internal static class Palette
         Success = From(theme, "SuccessBrush", Success);
         Warn = From(theme, "WarnBrush", Warn);
         Error = From(theme, "ErrorBrush", Error);
-        ClaudeText = From(theme, "ClaudeTextBrush", ClaudeText);
-        CodexText = From(theme, "CodexTextBrush", CodexText);
-        ClaudeFill = From(theme, "ClaudeFillBrush", ClaudeFill);
-        CodexFill = From(theme, "CodexFillBrush", CodexFill);
-        GeminiText = From(theme, "GeminiTextBrush", GeminiText);
-        GeminiFill = From(theme, "GeminiFillBrush", GeminiFill);
         UserBubble = From(theme, "UserBubbleBrush", UserBubble);
         AssistantBubble = From(theme, "AssistantBubbleBrush", AssistantBubble);
+
+        var families = new Dictionary<AppFamily, (Brush, Brush, Brush)>();
+        foreach (var family in Sources.Families.Select(f => f.Family))
+        {
+            var name = family.ToString();
+            families[family] = (From(theme, name + "TextBrush", TextOf(family)),
+                From(theme, name + "FillBrush", FillOf(family)),
+                From(theme, name + "Brush", BarOf(family)));
+        }
+        _families = families;      // replaced whole: rows read it from any thread
     }
 
     private static Brush From(ResourceDictionary theme, string key, Brush fallback)

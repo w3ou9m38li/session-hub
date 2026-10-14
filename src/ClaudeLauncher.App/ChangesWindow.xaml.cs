@@ -84,17 +84,16 @@ public partial class ChangesWindow : Window
 
     private async Task LoadAsync()
     {
-        if (_row.IsGemini || _row.IsGeminiWeb)
+        if (_row.Source.Changes == ChangesSupport.None)
         {
-            // Its session file keeps what was said, not an edit-by-edit record of files.
-            SummaryLine.Text = "这个来源不记录文件改动";
-            EmptyText.Text = _row.IsGeminiWeb
-                ? "从 Google Takeout 导入的网页版对话里没有文件改动的记录，这里列不出来。"
-                : "Gemini CLI 的会话记录里没有逐次记下改了哪些文件，这里列不出来。";
+            // Its records keep what was said, not an edit-by-edit record of files — or edits in a
+            // form this window does not read: the source says which.
+            SummaryLine.Text = _row.Source.NoChangesSummary ?? "这个来源不记录文件改动";
+            EmptyText.Text = _row.Source.NoChangesText ?? "这个来源的记录里没有文件改动，这里列不出来。";
             EmptyText.Visibility = Visibility.Visible;
             return;
         }
-        var codex = _row.IsCodex;
+        var codex = _row.Source.Changes == ChangesSupport.CodexPatches;
         // A copy made the copied changes in the conversation it came from, not in this one.
         var own = OwnPart.For(_row.Metadata);
         var copied = _row.IsCodex ? "分叉" : "续接";

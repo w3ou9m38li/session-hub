@@ -1,23 +1,23 @@
-# 会话管家 0.18.0 · Claude / ChatGPT / Gemini
+# 会话管家 0.23.0 · Claude / ChatGPT / Gemini / DeepSeek
 
 > **Session Hub** — a read-only Windows manager for the conversation history your AI apps keep on
-> this computer: Claude (desktop Code and terminal CLI), ChatGPT Codex and Gemini (CLI, and the
-> web app through Google Takeout). One searchable list, a transcript reader, export, token usage,
+> this computer: Claude (desktop Code, terminal CLI, and claude.ai through its data export), ChatGPT (Codex, and
+> chatgpt.com through its data export), Gemini (CLI, and the web app through Google Takeout) and DeepSeek Harness. One searchable list, a transcript reader, export, token usage,
 > and a copy of every record kept even after an app deletes it. Chinese UI. Built with the help of
 > ChatGPT, Claude and Gemini.
 > **[Download the latest release](../../releases/latest)** · [MIT License](LICENSE)
 
 本项目由 ChatGPT、Claude、Gemini 辅助构建。
 
-独立第三方工具，**不是 Anthropic、OpenAI 或 Google 的产品**。它只做两件事：
+独立第三方工具，**不是 Anthropic、OpenAI、Google 或 DeepSeek 的产品**。它只做两件事：
 
 1. **一键打开官方应用**：Claude 桌面版、ChatGPT 桌面版（Codex 所在的应用），都不等待任何索引。
 2. **把本机两款应用（以及 Gemini）的全部对话记录整理成一个目录**：Claude 的桌面 Code 与终端 CLI
-   会话、ChatGPT 的 Codex 任务、Gemini CLI 的终端会话，还有从 Google Takeout 导入的 Gemini 网页版对话，
+   会话、ChatGPT 的 Codex 任务、Gemini CLI 的终端会话、DeepSeek Harness（dsh）的会话，还有从各自的数据导出导入的 ChatGPT、Claude、Gemini 网页版对话，
    同一张表里搜索、分组、归档、查看正文、导出，或用各自的 CLI 接着聊。
 
-**对 Claude、ChatGPT 和 Gemini CLI 的实际数据一律只读。** 会话记录、transcript、rollout、侧边栏分组、归档标记，
-本工具只读取、从不写入（导入 Google Takeout 时也只读你选中的导出文件）；它写出的每一个文件都在自己的目录 `D:\ClaudeLauncherData` 里（任务栏跳转列表里的
+**对 Claude、ChatGPT、Gemini CLI 和 DeepSeek Harness 的实际数据一律只读。** 会话记录、transcript、rollout、侧边栏分组、归档标记，
+本工具只读取、从不写入（导入 Google Takeout、ChatGPT 和 Claude 的数据导出时也只读你选中的导出文件）；它写出的每一个文件都在自己的目录 `D:\ClaudeLauncherData` 里（任务栏跳转列表里的
 最近对话由 Windows 自己保存，「⋯」菜单可以关掉）。
 
 **列表只加不减。** 应用清理、删除或挪走了自己的记录，会话管家照样列着这条对话（标「原记录已删」），并且早就在
@@ -29,13 +29,16 @@
 | 做法 | 本工具 | 为什么 |
 |---|---|---|
 | 启动 Claude | 商店版：`shell:AppsFolder\Claude_pzs8sxrjxfjjc!Claude`；独立安装包版：它自己的 `claude.exe`（版本信息里的公司须是 Anthropic） | AUMID 由 Windows 包注册表解析，**不含版本号** |
+| 启动 DeepSeek Harness | 你自己的快捷方式「DeepSeek Harness…」（桌面或开始菜单，你的或所有用户的）；没有时用会话位置旁边部署文件夹里的启动脚本 | 服务、端口和带登录令牌的网址都由它自己的脚本处理：会话管家不启动服务、不读令牌 |
 | 启动 ChatGPT | 优先桌面上的「Codex++（全部任务）」快捷方式；没有时用商店包的 AUMID：依次认 `OpenAI.Codex` 与 `OpenAI.ChatGPT-Desktop`（都须是 OpenAI 的发布者 ID `2p2nqsd0c76g0`），应用 Id 读自包清单（本机为 `OpenAI.Codex_2p2nqsd0c76g0!App`） | 快捷方式是你自己的启动方式，自带"商店版正在运行就拒绝"的保护，不与它打架 |
 | 安装路径 | 只记录，从不执行 | `C:\Program Files\WindowsApps\…` 每次更新都变 |
 | 程序包 | 不碰 | 不打补丁、不改签名、不镜像 |
 | 打开一条对话 | Claude：`claude://claude.ai/epitaxy/local_…`、`claude://resume?session=…`；ChatGPT：`codex://threads/<任务 ID>` | 应用自己的链接，不含版本号和安装路径；交给正在运行的 ChatGPT 时用它此刻的程序路径，现查现用 |
 | 私有接口 | 不用 | 不调内部 IPC、不启动 App Server、不复用内部端点 |
 | Gemini 网页版 | 只读你选中的 Google Takeout 导出 | 不登录、不联网、不调网页版的接口；导出里的东西复制到数据目录 `gemini-web\` 后再读 |
-| 应用数据 | **只读** | Claude 的 `claude-code-sessions` / `projects`，Codex 的 `state_5.sqlite` / `sessions` / `archived_sessions`，Gemini CLI 的 `tmp\*\chats\session-*.json` 与 `.project_root`，全部只读打开；Gemini 同一目录里的登录凭据 `oauth_creds.json` 从不打开 |
+| ChatGPT / Claude 网页版 | 只读你选中的数据导出 | 同样不登录、不联网、不调网页版的接口；导出里的对话复制到数据目录 `chatgpt-web\` / `claude-web\` 后再读 |
+| DeepSeek Harness | 只读它数据目录里的会话日志与工作区记录 | 不连它的网页服务、不读启动日志里的登录令牌；按 dsh 自己写在文件名里的格式代数取最新一份 |
+| 应用数据 | **只读** | Claude 的 `claude-code-sessions` / `projects`，Codex 的 `state_5.sqlite` / `sessions` / `archived_sessions`，Gemini CLI 的 `tmp\*\chats\session-*.json` 与 `.project_root`，DeepSeek Harness 的 `sessions\*\session-*\session.v*.jsonl[.zstd]` 与 `storages\workspace.json`，全部只读打开；Gemini 同一目录里的登录凭据 `oauth_creds.json`、DeepSeek Harness 的 `.credentials.yaml` 从不打开 |
 
 ## 数据目录
 
@@ -45,8 +48,11 @@ D:\ClaudeLauncherData\
 ├─ search-index.sqlite 对话内容的全文索引：只含你和助手说的话，不含工具输出；关掉内容搜索即删除，可随时重建
 ├─ gemini-web\         从 Google Takeout 导入的 Gemini 网页版对话（entries.json + 每段对话一份 + 附带的图片）：
 │                      不是缓存——导出文件和 Google 那边的旧记录可能都没了，删掉就要重新导入
-├─ archive\            每条对话记录文件的副本（copies\，文件夹开了 NTFS 压缩）与清单 archive.sqlite：应用删掉或
-│                      清理了原记录时读这里。不是缓存，删掉就丢了应用已经删掉的那些；只随「从会话管家删除」减少
+├─ chatgpt-web\        从 ChatGPT 的数据导出导入的网页版对话（每段对话一份 + 图片）：同样不是缓存
+├─ claude-web\         从 Claude 的数据导出导入的网页版对话（每段对话一份）：同样不是缓存
+├─ archive\            每条对话记录文件的副本（copies\，Zstandard 压缩，约为原记录的三分之一，读时按位置直接解开）
+│                      与清单 archive.sqlite：应用删掉或清理了原记录时读这里。不是缓存，删掉就丢了应用已经删掉的那些；
+│                      只随「从会话管家删除」减少
 ├─ probe-cache.json    每条终端记录读出的标题、目录等（按大小和修改时间核对），下次启动只重读变过的；可随时删除
 ├─ usage.sqlite        用量统计的账本：从记录里读出的每次调用的 token 数（按天、模型汇总）；可随时删除，打开「用量统计」时重建
 ├─ export\             会话清单、导出的对话（Markdown / 网页）
@@ -66,9 +72,12 @@ D:\ClaudeLauncherData\
 |---|---|---|
 | **Claude 桌面 Code** | `claude-code-sessions\{账号}\{组织}\local_*.json` | 只读 JSON；侧边栏分组读自 Claude 的本地偏好缓存 |
 | **Claude 终端 CLI** | `%CLAUDE_CONFIG_DIR%\projects\*\*.jsonl` | 只读文件头（256 KB 预算）取标题与工作目录，大小和修改时间都没变的文件下次不重读；子代理 JSONL 只计数（每 5 分钟重数一次） |
+| **ChatGPT 网页版（导入）** | 你选中的 ChatGPT 数据导出：zip 里的 `conversations.json`（大导出拆成 `conversations-*.json`）与同包的图片 | 只在导入时读，一段一段流式读：每段对话取 `current_node` 回溯出的那条分支，写成一份 Gemini CLI 格式的文档存进数据目录 `chatgpt-web\`，之后列表、阅读器、内容索引、导出都读这份；没导入过就没有这个来源 |
+| **Claude 网页版（导入）** | 你选中的 Claude 数据导出：zip 里的 `conversations.json` | 同上，存进 `claude-web\`；消息带父消息时取最后写的那条分支，否则按顺序 |
 | **Gemini 网页版（导入）** | 你选中的 Google Takeout 导出：zip 里的 `My Activity\Gemini Apps\MyActivity.json` 与同目录的图片 | 只在导入时读一次，提问与回答合并进数据目录 `gemini-web\`（按提问的时间、内容和所在对话去重），每段对话写成一份 Gemini CLI 格式的文档，之后列表、阅读器、内容索引、导出都读这份；没导入过就没有这个来源 |
 | **Gemini CLI** | `~\.gemini\tmp\<项目>\chats\session-*.json`；项目文件夹里的 `.project_root` 记着工作目录 | 只读 JSON。每个会话是一份随对话整份重写的文档，所以查看、内容索引、用量都整份读（不按偏移续读），大小和修改时间都没变的文件下次不重读；正写到一半、读不了的文件这次不算，下次同步再试，期间不删任何行。只在本机有这个文件夹时才出现这个来源 |
-| **Codex（ChatGPT）** | `%CODEX_HOME%\state_5.sqlite` 的 `threads` 表 + `sessions\` / `archived_sessions\` 里的 rollout 文件（也认被压缩成 `.jsonl.zst` 的，读时解压进副本） | SQLite **只读模式**打开；rollout 只按文件名建索引，数据库里没有的才读 64 KB 文件头。子任务（`thread_source=subagent` 或 spawn 来源）只计数不列出；Codex 的侧边栏分区（`thread_sections`）作为它自己的分组显示 |
+| **DeepSeek Harness** | `DSH_HOME`（进程、用户、系统环境变量）、`~\.dsh` 和你在「DeepSeek Harness 的会话位置…」里添加的文件夹下的 `sessions\<工作目录>\session-<id>\session.vN.jsonl[.zstd]`；`storages\workspace.json` 里的归档列表 | 整份解压来读（一行一个事件、几行一帧接在末尾）：标题取最后一次 `session/title`，用量取每条 `assistant/message` 的 `usage`。同一会话目录里有新旧两代日志时读代数最高的；大小和修改时间都没变的文件下次不重读；最后一帧写到一半时读前面的、这次不算完整读取。子代理会话（`delegationDepth` > 0）只计数。只在找到或添加了数据目录时才出现这个来源 |
+| **Codex（ChatGPT）** | `%CODEX_HOME%\state_5.sqlite` 的 `threads` 表 + `sessions\` / `archived_sessions\` 里的 rollout 文件（也认被压缩成 `.jsonl.zst` 的，第一次读时压进自己的副本再读） | SQLite **只读模式**打开；rollout 只按文件名建索引，数据库里没有的才读 64 KB 文件头。子任务（`thread_source=subagent` 或 spawn 来源）只计数不列出；Codex 的侧边栏分区（`thread_sections`）作为它自己的分组显示 |
 
 `CODEX_HOME` 依次取进程环境变量、用户环境变量、`~\.codex`。数据库里记的 rollout 路径找不到时，按任务 ID
 在两个目录里找；`\\?\` 前缀会去掉再显示。
@@ -181,7 +190,7 @@ D:\ClaudeLauncherData\
 
 | 操作 | 做什么 | 碰应用吗 |
 |---|---|---|
-| **打开 Claude** / **打开 ChatGPT** | 见上表；应用探测经 Windows 包管理接口，只需几毫秒 | 只启动 |
+| **打开 Claude** / **打开 ChatGPT** / **打开 DeepSeek** | 见上表；应用探测经 Windows 包管理接口，只需几毫秒；「打开 DeepSeek」只在找到 DeepSeek Harness 的启动方式时显示（本机 24 ms 找到桌面快捷方式） | 只启动 |
 | **同步**（F5） | 重新扫描各个来源的元数据，只重读有变化的记录，状态栏写明「没有变化」或「N 条新增或更新」；来源读取完整时，应用里已经没有的对话标「原记录已删」、照样列着（不删）。读文件时目录不上锁，列表照常可用。另见上面的「自己保持最新」 | 只读 |
 | **从会话管家删除…**（右键菜单） | 删掉这一行、并入它的记录、它的副本和索引内容，以后不再列出；问过你才删，不能撤销 | 只改本工具 |
 | **查看对话记录**（Enter / 双击） | 打开正文阅读器，见下节 | 只读 |
@@ -192,8 +201,10 @@ D:\ClaudeLauncherData\
 | **claude --resume** / **codex resume 继续** / **gemini --resume** | 在原工作目录用各自官方 CLI 恢复该会话，按选中行自动切换；Codex 的 CLI 取自 PATH、商店别名、Codex++ 的托管副本或商店包；Gemini CLI 取自 PATH 或 npm 的全局目录（`%APPDATA%\npm\gemini.cmd`） | 只启动 |
 | **生成记忆候选草稿…**（详情面板） | 从你自己的发言里原样摘录候选（两种正文格式都支持），完成后可直接打开草稿或所在文件夹 | 只读 |
 | **导出全部会话清单**（⋯ 菜单） | 按工作目录分组的 Markdown + CSV（含来源、分组列），完成后打开导出目录 | 只读 |
-| **导入 Gemini 网页版（Google Takeout）…**（⋯ 菜单） | 窗口里是在 Takeout 导出的分步说明和「打开 takeout.google.com」；选中下载的 zip（或其中的 MyActivity.json，可多选）导入，再导入只补新增的；也在这里移除已导入的记录 | 只读导出 |
-| **用量统计…**（⋯ 菜单） | 统计 Claude、Codex 与 Gemini CLI 用了多少 token：按天、模型、工作目录、会话；第一次读完全部记录（本机约 11 秒），之后只读新增的部分 | 只读 |
+| **导入 Gemini 网页版（Google Takeout）…**（⋯ 菜单） | 窗口里是在 Takeout 导出的分步说明和「打开 takeout.google.com」；下载文件夹里有带 Gemini 活动记录的新导出时直接列出来；选中下载的 zip（或其中的 MyActivity.json，可多选）导入，再导入只补新增的；也在这里移除已导入的记录 | 只读导出 |
+| **导入 ChatGPT 网页版 / Claude 网页版（数据导出）…**（⋯ 菜单） | 窗口里是在 ChatGPT / Claude 设置里导出数据的分步说明和打开设置页的链接；下载文件夹里有比上次导入新的导出包时直接列出来、一键导入；也可以选中邮件里下载的 zip（或其中的 conversations.json，可多选）导入，再导入只补新增、更新变过的；也在这里移除已导入的记录 | 只读导出 |
+| **DeepSeek Harness 的会话位置…**（⋯ 菜单） | 列出正在读的 dsh 数据目录（自动找到的和你添加的，各有多少会话）；添加文件夹（部署的根目录或里面的 `data`）、移除你添加的；改了以后马上同步。移除的位置里已列出的会话照样保留 | 只读 |
+| **用量统计…**（⋯ 菜单） | 统计 Claude、Codex、Gemini CLI 与 DeepSeek Harness 用了多少 token：按天、模型、工作目录、会话，每次调用平均读入的上下文与缓存命中，会话也能按每次上下文排；第一次读完全部记录（本机约 11 秒），之后只读新增的部分 | 只读 |
 | **改动的文件…**（详情面板 / 阅读器底部） | 这条对话改过的文件与每一次的差异，读自对话记录 | 只读 |
 | **设为分组…**（Ctrl+G）/ **移出分组** / **按目录自动分组** | 本工具自己的标签，支持多选批量，可撤销 | 不碰 |
 | **收起到归档**（Delete）/ **恢复到活跃** | 只改本工具的列表分组，**完全可逆**，可撤销 | 不碰 |

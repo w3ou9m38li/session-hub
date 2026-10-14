@@ -225,6 +225,13 @@ public partial class MainWindow : Window
             case nameof(MainViewModel.InstallationText):
                 InstallationRun.Text = _vm.InstallationText;
                 break;
+            case nameof(MainViewModel.DeepSeekLaunchTarget):
+                // Shown only where DeepSeek Harness has an entry point of the user's own to start it by.
+                OpenDeepSeekButton.Visibility = _vm.DeepSeekLaunchTarget is null ? Visibility.Collapsed : Visibility.Visible;
+                if (_vm.DeepSeekLaunchTarget is { } target)
+                    OpenDeepSeekButton.ToolTip = $"通过「{DeepSeekHarnessLauncher.NameOf(target)}」启动 DeepSeek Harness，在浏览器里打开；已在运行时直接打开网页\n{target}";
+                UpdateSelectionUi();
+                break;
             case nameof(MainViewModel.HasMorePages):
                 LoadMoreButton.Visibility = _vm.HasMorePages ? Visibility.Visible : Visibility.Collapsed;
                 break;
@@ -261,7 +268,7 @@ public partial class MainWindow : Window
                 break;
             case nameof(MainViewModel.SelectedBackendOption):
                 BackendFilterBox.SelectedItem = _vm.SelectedBackendOption;
-                AppSettings.Update(s => s with { AppFilter = _vm.SelectedBackendOption.Filter.Kind.ToString() });
+                AppSettings.Update(s => s with { AppFilter = _vm.SelectedBackendOption.Filter.Name });
                 break;
             case nameof(MainViewModel.SelectedTimeOption):
                 TimeFilterBox.SelectedItem = _vm.SelectedTimeOption;
@@ -568,6 +575,13 @@ public partial class MainWindow : Window
         if (result.Outcome is LaunchOutcome.PackageNotFound or LaunchOutcome.IdentityMismatch
             or LaunchOutcome.ShellUnavailable)
             MessageDialog.Show(this, DialogKind.Warning, "无法启动 ChatGPT", result.Message);
+    }
+
+    private async void OpenDeepSeek_Click(object sender, RoutedEventArgs e)
+    {
+        var result = await _vm.OpenDeepSeekAsync();
+        if (result.Outcome is LaunchOutcome.PackageNotFound or LaunchOutcome.ShellUnavailable)
+            MessageDialog.Show(this, DialogKind.Warning, "无法启动 DeepSeek Harness", result.Message);
     }
 
     private async void Sync_Click(object sender, RoutedEventArgs e) => await _vm.SyncAsync();
@@ -1079,7 +1093,7 @@ public partial class MainWindow : Window
         Add(SortField.Title, TitleColumn, "标题", "点击按标题排序（中文按拼音），再点一次反向");
         Add(SortField.Group, GroupColumn, "分组",
             "白色：本工具的分组　蓝色：应用自己的分组　灰色「—」：未分组\n点击按分组排序并分段显示，再点一次反向");
-        Add(SortField.Source, SourceColumn, "来源", "点击按来源分段：Claude 桌面、Claude 终端、ChatGPT、Gemini");
+        Add(SortField.Source, SourceColumn, "来源", "点击按来源分段：Claude（桌面、终端、网页）、ChatGPT（Codex、网页）、Gemini、DeepSeek 依次排开");
         Add(SortField.Project, ProjectColumn, "工作目录",
             "列宽不够时保留末尾的目录名，悬停一行看完整路径\n点击按工作目录排序并分段显示");
         Add(SortField.LastActivity, TimeColumn, "最后活动", "默认按最后活动从新到旧；再点一次从旧到新");
@@ -1461,8 +1475,7 @@ public partial class MainWindow : Window
         if (!row.CanOpenInApp)
         {
             MessageDialog.Show(this, DialogKind.Info, "不能在应用中打开",
-                row.IsGemini || row.IsGeminiWeb ? row.OpenInAppTooltip
-                    : "只有 Claude（桌面 Code / 终端 CLI）和 Codex 会话可以在应用中打开。");
+                row.Source.Open == OpenRoute.CodexLink ? "这条任务的 ID 不是 ChatGPT 能打开的格式。" : row.OpenInAppTooltip);
             return;
         }
 
@@ -1470,8 +1483,14 @@ public partial class MainWindow : Window
         if (result.Outcome != DeepLinkOutcome.Requested)
         {
             MessageDialog.Show(this, DialogKind.Warning,
-                row.IsCodex ? "无法打开 ChatGPT" : row.IsGeminiWeb ? "无法在浏览器中打开" : "无法在 Claude 中打开",
-                result.Message + (row.IsCodex || row.IsGeminiWeb ? string.Empty : "\n\n" + ClaudeDeepLink.FailureHint));
+                row.Source.Open switch
+                {
+                    OpenRoute.CodexLink => "无法打开 ChatGPT",
+                    OpenRoute.WebLink => "无法在浏览器中打开",
+                    OpenRoute.AppOnly => $"无法启动 {row.AppName}",
+                    _ => "无法在 Claude 中打开",
+                },
+                result.Message + (row.Source.Open == OpenRoute.ClaudeLink ? "\n\n" + ClaudeDeepLink.FailureHint : string.Empty));
         }
     }
 
@@ -1764,11 +1783,32 @@ public partial class MainWindow : Window
 
     private void Usage_Click(object sender, RoutedEventArgs e) => UsageWindow.ShowFor(this, _vm, Locate);
 
+    private async void ImportChatGptWeb_Click(object sender, RoutedEventArgs e) =>
+        await ImportWebExportAsync(ConversationKey.ChatGptWeb);
+
+    private async void ImportClaudeWeb_Click(object sender, RoutedEventArgs e) =>
+        await ImportWebExportAsync(ConversationKey.ClaudeWeb);
+
+    private async Task ImportWebExportAsync(string backend)
+    {
+        var (choice, files) = WebExportImportDialog.Ask(this, Infrastructure.Backends.WebExportStore.InDataRoot(backend));
+        if (choice == WebExportImportDialog.Outcome.Import) await _vm.ImportWebExportAsync(backend, files);
+        else if (choice == WebExportImportDialog.Outcome.Remove) await _vm.RemoveWebExportAsync(backend);
+    }
+
     private async void ImportTakeout_Click(object sender, RoutedEventArgs e)
     {
         var (choice, files) = TakeoutImportDialog.Ask(this, new Infrastructure.Backends.GeminiTakeoutStore(LauncherPaths.GeminiTakeoutStore));
         if (choice == TakeoutImportDialog.Outcome.Import) await _vm.ImportTakeoutAsync(files);
         else if (choice == TakeoutImportDialog.Outcome.Remove) await _vm.RemoveTakeoutAsync();
+    }
+
+    private async void DshHomes_Click(object sender, RoutedEventArgs e)
+    {
+        if (DshHomesDialog.Ask(this, AppSettings.Current.DshHomes) is not { } homes) return;
+        AppSettings.Update(s => s with { DshHomes = homes });
+        await _vm.FindDeepSeekAsync();
+        await _vm.SyncAsync();
     }
 
     /// <summary>The conversation to select once the list shows it, and until when to wait for that.</summary>

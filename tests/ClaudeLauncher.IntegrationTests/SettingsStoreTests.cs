@@ -53,6 +53,16 @@ public sealed class SettingsStoreTests : IDisposable
         Assert.Equal(loaded, SettingsStore.Load(_path).UsageApp);
     }
 
+    [Theory]
+    [InlineData("PerCall", "PerCall")]
+    [InlineData("Total", null)]
+    [InlineData(null, null)]
+    public void TheUsageWindowKeepsHowItRanks(string? saved, string? loaded)
+    {
+        Assert.True(SettingsStore.Save(_path, new LauncherSettings { UsageRank = saved }));
+        Assert.Equal(loaded, SettingsStore.Load(_path).UsageRank);
+    }
+
     [Fact]
     public void AMissingFileReadsAsDefaults()
     {

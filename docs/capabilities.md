@@ -1,3 +1,71 @@
+> **0.23.0（2026-10-14）说明**：读写边界不变。`ExportFinder.Newest(kind, folder, savedAfter)`：下载文件夹
+> （`%USERPROFILE%\Downloads`）顶层按修改时间最新的 40 个 `*.zip`，只用 `ZipFile.OpenRead` 读中央目录里的文件名：
+> `conversations*.json` 加 `chat.html` / `message_feedback.json` / `user.json` / `shared_conversations.json` 为 ChatGPT，加
+> `users.json` / `projects.json` 为 Claude，都没有时两边都算；文件夹名含 Gemini 或 Bard 的 `.json` / `.html` 为 Takeout。
+> 比 `savedAfter`（该来源上次导入的时间）旧就停；打不开的 zip 跳过。三个导入窗口在 `Loaded` 后台找，找到时显示
+> 「导入这一份」。
+>
+> **0.22.0（2026-10-14）说明**：读写边界不变，新增的只读输入是用户选中的数据导出。两个新来源登记在 `Sources`：
+> `ConversationKey.ChatGptWeb = "chatgpt-web"`（`AppFamily.Codex`）与 `ClaudeWeb = "claude-web"`（`AppFamily.Claude`），
+> `StandingRule.Imported`、`OpenRoute.WebLink`、`CopyKey.None`、不计用量；排序依次为桌面 Code、终端 CLI、Claude 网页、
+> Codex、ChatGPT 网页、Gemini CLI、Gemini 网页、DeepSeek。`ExportPackage`：zip，或所选 JSON 所在的文件夹（往下三层），
+> `ConversationFiles` 取最浅一层的 `conversations*.json`，`Conversations` 用 `JsonSerializer.DeserializeAsyncEnumerable`
+> 逐段读数组（根是对象时读其 `conversations` 或它本身）。`ChatGptExport`：`mapping` 从 `current_node` 沿 `parent` 回溯
+> （没有时从根沿最后一个子节点）；`metadata.is_visually_hidden_from_conversation`、`system`、`user_editable_context` /
+> `model_editable_context` 不显示；`thoughts` → 思考，`recipient` 不是 `all` 的助手消息 → 工具调用，`tool` → 其结果
+> （按 id 或最后一个未答的调用配对），`reasoning_recap` 略过；`image_asset_pointer`（`file-service://file-…`、
+> `sediment://file_…`）与 `metadata.attachments` 按名字开头的文件 ID 在包里找、按内容哈希存进 `files\`（大于 64 MB 只写名字）；
+> 去掉 `…` 与【n†source】。`ClaudeExport`：`chat_messages` 有 `parent_message_uuid` 时从最后写的消息回溯，否则按
+> 顺序；`text` / `thinking`（摘要作标题）/ `tool_use` / `tool_result`（按 `tool_use_id` 配对）；`attachments` 写名字，
+> `extracted_content` 作一条提示；`files` 只写名字。`TurnBuilder` 让一轮回答按「思考 → 文字与图片 → 工具调用」排，晚到的
+> 另起一轮。`WebExportStore`：`<data>\chatgpt-web|claude-web\conversations\session-<id>.json`（Gemini CLI 格式，`kind` 为
+> `chatgpt-export` / `claude-export`，`summary` 为标题，`link` 为网页地址），内容不变不重写，从不删除旧对话；`Remove` 删整个
+> 目录。`GeminiMetadataReader.ForImport` 列行；`GeminiSession.ReadHeader` 对本工具写的文档（`kind` 在 `messages` 前）只读前
+> 64 KB 到第一句用户的话（`QuickHeader`），否则整份；助手一侧的 `launcherFile` / `fileData` 也显示。`WebLinks`（取代
+> `GeminiWebLink`）：Gemini 只认十六进制 ID、ChatGPT 与 Claude 只认 UUID。用量：`TokenCounts.Context` /
+> `ContextPerCall` / `CacheHit`，用量窗口第六张卡片与会话排行的「每次上下文最大」（至少 5 次调用），设置 `UsageRank`。
+>
+> **0.21.0（2026-10-14）说明**：读写边界不变。**来源登记**：`Core/Contracts/Sources` 为每个来源一条 `SourceInfo`——家族
+> `AppFamily`（存进用量账本的值与原 `UsageApp` 相同）、排序、列名 / 报告名 / 导出名 / 分段名、「应用内」规则
+> `StandingRule` 与各状态的文字、打开 `OpenRoute`、续接 `ResumeRoute`、改动 `ChangesSupport`、副本 `CopyFamily` +
+> `CopyKey`、是否计用量。界面文字、筛选（`BackendFilter(AppFamily?)` 取代 `BackendFilterKind`）、按来源与按「应用内」排序的
+> SQL（由登记生成）、副本身份、找不到记录时的说明、调色板（`{家族}Brush` / `TextBrush` / `FillBrush` 按家族取）都读这里；
+> `SourceRegistryTests` 核对每个来源都登记了、排序不重、SQL 与规则一致。**副本压缩**：`PackedCopy` 用 Zstandard 的可寻址
+> 格式——每帧约 32 MiB（在换行处切，最多 64 MiB），各自独立压缩（级别 6、长距离匹配、窗口 2^25、带校验和），最后是跳读帧
+> 里的寻址表（每帧压缩与原始长度，结尾魔数 `0x8F92EAB1`），任何 zstd 解码器都能整份解开。`PackedCopyStream` 只解位置所在的
+> 一帧：顺序读时流式解，帧内往后跳边解边丢；以 `FileOptions.RandomAccess` 打开（阅读器从末尾读）时整帧一次解进非托管缓冲
+> （充当解码窗口，关闭即释放），同帧再读不再解。`TranscriptFiles.OpenSeekable` / `Stat` 让阅读器、内容索引、用量、改动、
+> dsh 与 Gemini 的整份读都把副本当原文件读，长度与偏移是原文的。`TranscriptArchive`：副本名
+> `<家族>\<id>.(jsonl|json|dsh.jsonl).zst`；记录变长时，用记下的副本末尾 4 KB 的 SHA-256（新列 `tail_hash`）比对原文同一
+> 位置，相同才 `PackedCopy.Append`（末帧不到 8 MiB 时连同新内容重写这一帧；写失败把覆盖掉的末帧与寻址表原样写回）；
+> 解不开的副本整份重做；`Readable` 取代 `Unpacked`。旧的明文副本在每轮剩下的时间里从旧到新压缩：读时算 SHA-256，压好后
+> 整份解压再算一遍，相同才改记录、删明文；`stored_length` 记占用。只在本数据目录的 `copies\` 里写和删：记录指向别处（数据
+> 目录搬过）时先在这里找同名文件，找不到就只读那一份、压一份到这里，原文件不动；上一轮留下的 `.part` 与压好后没删掉的
+> 明文在一轮无事可做时清掉。`copies\` 的 NTFS 压缩关掉（`FSCTL_SET_COMPRESSION` 格式 0，只影响新文件）。内容索引与用量
+> 账本遇到「同名加 `.zst`、长度相同」的副本只改记下的路径，不重读。后台顺序改为内容索引 → 用量 → 副本。
+>
+> **0.20.0（2026-10-14）说明**：`DeepSeekHarnessLauncher.Find(homes)` 依次找桌面（用户、公共）上名字以「DeepSeek Harness」
+> 开头的 `.lnk`、开始菜单（用户、公共，最多三层）里的同名快捷方式、会话位置 `<部署>\data` 的上一级里名字含 DeepSeek 且
+> 含「启动 / 打开 / start / launch / open」的 `.cmd` / `.bat` / `.lnk`；名字含「停止 / 关闭 / stop / uninstall」的一律跳过。
+> `Open` 只 `ShellExecute` 这个入口（工作目录为它所在的文件夹）。`MainViewModel.DeepSeekLaunchTarget` 在启动时和会话位置
+> 改动后后台重找；为空时工具栏按钮 `OpenDeepSeekButton` 收起、行上的「在应用中打开」不可用。
+>
+> **0.19.0（2026-10-14）说明**：新增来源 DeepSeek Harness（`ConversationKey.DeepSeek = "dsh"`），读写边界不变：只读
+> dsh 数据目录里的 `sessions\<工作目录>\session-<id>\session.vN.jsonl[.zstd]` 与 `storages\workspace.json`，从不打开
+> `.credentials.yaml`。`DshPaths.Discover(added)`：设置里的 `DshHomes`、`DSH_HOME`（进程 / 用户 / 系统）、`~\.dsh`，
+> `HomeOf` 认目录本身或其中的 `data`（有 `sessions` 才算）。`LogOf` 按 `DshSession.GenerationOf`（`session.jsonl` 为 0，
+> `session.vN.jsonl` 为 N，可带 `.zstd`）取最高代。`DshSession.ReadLines` 用 ZstdSharp 流式解压整个多帧文件，最后一帧
+> 写到一半（`ZstdException` 等）时保留之前的完整行；事件类型与时间从行首直接取，只解析需要的行。头部：`session` 行的
+> id / createdAt / cwd / delegationDepth，最后一次 `session/title`，第一句 `source.kind=user` 的发言。条目：`user/message`
+> 按来源分你的话与「注入的上下文」，`assistant/message` 的 reasoning / text / tool-call，`tool/result`，approval、command、
+> `turn/end` 的 error 与 aborted；`tool/call` 事件与块重复、`system/message` 不显示。用量取 `assistant/message.usage`（互不
+> 重叠：inputTokens 为未命中缓存的输入，cacheRead / cacheWrite 另计，reasoning 含在 output 里），键为消息 id。
+> `DshMetadataReader`：子代理只计数；`NativeArchiveState` 读自 `global.archivedSessionIds`，读不了为 Unknown。
+> `WholeTranscript` 把 Gemini CLI 与 dsh 统一为整份读（阅读器分页、末尾、内容索引、用量都整份重读）。副本：
+> `copies\dsh\<id>.dsh.jsonl`，日志一分钟没动后整份解压到最后一个完整行。`SqliteCatalog.MarkGone(…, accounts)` 只判
+> 本次读完的数据目录，`SyncRead.CompleteAccounts` 带出范围。界面：`BackendFilterKind.DeepSeek`、`UsageApp.DeepSeek`、
+> 紫色画刷 `DeepSeekBrush` / `DeepSeekTextBrush` / `DeepSeekFillBrush`、`DshHomesDialog`。
+>
 > **0.18.0（2026-10-13）说明**：读写边界不变。`CliProbeCache.Load/Save`（数据目录 `probe-cache.json`，`ProbeRules`
 > 版本号不符或损坏即空），`CatalogSyncService(…, probeCacheFile)` 在读完终端记录后有变化才存。`Read(…, newestTranscripts)`
 > 与 `CliMetadataReader.Read(…, newest)` 只读最后写的 N 个、不 `Retain`、终端来源记 Partial（不进 `Complete`，不标消失）；

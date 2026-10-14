@@ -4,10 +4,17 @@
     <TargetFramework>net10.0-windows</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!-- A packed copy's frame read whole lives outside the managed heap, handed back when the copy is closed. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
   </PropertyGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\ClaudeLauncher.Core\ClaudeLauncher.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The tests write packed copies with small frames, to have many in a small file. -->
+    <InternalsVisibleTo Include="ClaudeLauncher.IntegrationTests" />
   </ItemGroup>
 
   <ItemGroup>

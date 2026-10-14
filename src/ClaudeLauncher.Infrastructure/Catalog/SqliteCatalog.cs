@@ -182,35 +182,30 @@ public readonly record struct GroupFilter(GroupFilterKind Kind, string? Name)
 /// <summary>One group and how many conversations are in it. Null name = ungrouped.</summary>
 public sealed record GroupTally(string? Name, int Count);
 
-public enum BackendFilterKind
+/// <summary>
+/// Which app's conversations the list shows: one app family (<see cref="AppFamily"/>) — Claude's
+/// desktop and terminal sessions together, Gemini CLI and Gemini on the web together — or all of
+/// them. The default value is <see cref="All"/>.
+/// </summary>
+public readonly record struct BackendFilter(AppFamily? Family)
 {
-    All,
-    /// <summary>Claude desktop Code and terminal CLI together: two views of one app's history.</summary>
-    Claude,
-    /// <summary>Codex threads from the ChatGPT desktop app.</summary>
-    Codex,
-    /// <summary>Gemini CLI sessions and Gemini on the web, imported from Google Takeout: one app's history, as Claude's two are.</summary>
-    Gemini,
-}
+    public static BackendFilter All => new(null);
+    public static BackendFilter Claude => new(AppFamily.Claude);
+    public static BackendFilter Codex => new(AppFamily.Codex);
+    public static BackendFilter Gemini => new(AppFamily.Gemini);
+    public static BackendFilter DeepSeek => new(AppFamily.DeepSeek);
 
-/// <summary>Which app's conversations the list shows. The default value is <see cref="All"/>.</summary>
-public readonly record struct BackendFilter(BackendFilterKind Kind)
-{
-    public static BackendFilter All => new(BackendFilterKind.All);
-    public static BackendFilter Claude => new(BackendFilterKind.Claude);
-    public static BackendFilter Codex => new(BackendFilterKind.Codex);
-    public static BackendFilter Gemini => new(BackendFilterKind.Gemini);
+    public bool IsAll => Family is null;
 
-    public string Fingerprint => "b:" + Kind;
+    /// <summary>The name it is remembered by in the settings: 「All」 or the family's.</summary>
+    public string Name => Family?.ToString() ?? "All";
+
+    public string Fingerprint => "b:" + Name;
 
     /// <summary>SQL predicate on the sessions table, or null for no restriction.</summary>
-    internal string? Predicate => Kind switch
-    {
-        BackendFilterKind.Claude => "backend IN ('desktop-code','cli-code')",
-        BackendFilterKind.Codex => "backend='codex'",
-        BackendFilterKind.Gemini => "backend IN ('gemini','gemini-web')",
-        _ => null,
-    };
+    internal string? Predicate => Family is { } family
+        ? "backend IN (" + string.Join(",", Sources.BackendsOf(family).Select(b => "'" + b.Replace("'", "''") + "'")) + ")"
+        : null;
 }
 
 /// <param name="Applied">Rows whose group actually changed.</param>
@@ -308,19 +303,28 @@ public sealed class SqliteCatalog : IDisposable
     /// </summary>
     private const string SortTimeSql = "COALESCE(last_activity_utc,'" + NoTimeSentinel + "')";
 
-    /// <summary>Mirrors <c>OrderingRules.SourceRank</c>.</summary>
-    private const string SourceRankSql =
-        "CASE backend WHEN 'desktop-code' THEN 1 WHEN 'cli-code' THEN 2 WHEN 'codex' THEN 3 WHEN 'gemini' THEN 4 " +
-        "WHEN 'gemini-web' THEN 5 ELSE 9 END";
+    /// <summary>Mirrors <c>OrderingRules.SourceRank</c>: written from the same sources' ranks.</summary>
+    private static readonly string SourceRankSql =
+        "CASE backend " + string.Concat(Sources.All.Where(src => src.Read).Select(src => $"WHEN '{src.Backend}' THEN {src.Rank} "))
+        + $"ELSE {OrderingRules.UnknownRank} END";
 
-    /// <summary>Mirrors <c>OrderingRules.Standing</c>, as the enum's numeric value.</summary>
-    private const string StandingSql =
-        "CASE WHEN backend='codex' THEN (CASE WHEN native_archive_state='Archived' THEN 2 ELSE 1 END) " +
-        "WHEN backend='cli-code' THEN (CASE WHEN continued_in IS NOT NULL THEN 3 ELSE 4 END) " +
-        "WHEN backend='gemini-web' THEN 5 " +
-        "WHEN native_archive_state='Active' THEN 1 " +
-        "WHEN native_archive_state='Archived' THEN 2 " +
-        "WHEN native_archive_state='Unsupported' THEN 4 ELSE 6 END";
+    /// <summary>Mirrors <c>OrderingRules.Standing</c>, as the enum's numeric value: each source's rule, the app's state otherwise.</summary>
+    private static readonly string StandingSql =
+        "CASE " + string.Concat(Sources.All.Where(src => src.Read && src.Standing != StandingRule.AppState)
+            .Select(src => $"WHEN backend='{src.Backend}' THEN {StandingOf(src.Standing)} "))
+        + $"WHEN native_archive_state='Active' THEN {(int)AppStanding.Active} "
+        + $"WHEN native_archive_state='Archived' THEN {(int)AppStanding.Archived} "
+        + $"WHEN native_archive_state='Unsupported' THEN {(int)AppStanding.TerminalOnly} ELSE {(int)AppStanding.Unobserved} END";
+
+    private static string StandingOf(StandingRule rule) => rule switch
+    {
+        StandingRule.ArchivedOrListed =>
+            $"(CASE WHEN native_archive_state='Archived' THEN {(int)AppStanding.Archived} ELSE {(int)AppStanding.Active} END)",
+        StandingRule.TerminalTranscript =>
+            $"(CASE WHEN continued_in IS NOT NULL THEN {(int)AppStanding.EarlierPart} ELSE {(int)AppStanding.TerminalOnly} END)",
+        StandingRule.Imported => $"{(int)AppStanding.Imported}",
+        _ => throw new ArgumentOutOfRangeException(nameof(rule)),
+    };
 
     private readonly SqliteConnection _connection;
 
@@ -861,13 +865,18 @@ public sealed class SqliteCatalog : IDisposable
     /// <para>Only ever called for a source that was read completely. A source that failed
     /// keeps its rows unmarked: "unreadable" must never be turned into "gone".</para>
     /// </summary>
+    /// <param name="accounts">
+    /// When given, only rows of these accounts are judged: the ones that were read in full. A
+    /// source with several homes (DeepSeek Harness) says nothing about a home it no longer reads.
+    /// </param>
     /// <returns>How many rows were newly found gone.</returns>
-    public int MarkGone(string backend, IEnumerable<ConversationKey> present)
+    public int MarkGone(string backend, IEnumerable<ConversationKey> present, IReadOnlyCollection<string>? accounts = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(backend);
         ArgumentNullException.ThrowIfNull(present);
 
         var keep = present.Where(k => k.Backend == backend).ToHashSet();
+        var judged = accounts is null ? null : new HashSet<string>(accounts, StringComparer.OrdinalIgnoreCase);
         using var tx = _connection.BeginTransaction(deferred: false);
 
         var gone = new List<ConversationKey>();
@@ -883,6 +892,7 @@ public sealed class SqliteCatalog : IDisposable
             while (reader.Read())
             {
                 var key = new ConversationKey(backend, reader.GetString(0), reader.GetString(1), reader.GetString(2));
+                if (judged is not null && !judged.Contains(key.AccountContextId)) continue;
                 if (!keep.Contains(key)) gone.Add(key);
             }
         }

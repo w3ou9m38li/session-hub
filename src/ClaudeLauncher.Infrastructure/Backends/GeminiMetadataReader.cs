@@ -64,6 +64,10 @@ public sealed class GeminiMetadataReader
         new(ConversationKey.GeminiWeb, store.Root, () => store.SessionFiles().Select(f => (f, (string?)null)),
             resumable: false, cache);
 
+    /// <summary>The conversations imported from ChatGPT's or Claude's data export, kept in the same form.</summary>
+    public static GeminiMetadataReader ForImport(WebExportStore store, GeminiProbeCache? cache = null) =>
+        new(store.Backend, store.Root, () => store.SessionFiles().Select(f => (f, (string?)null)), resumable: false, cache);
+
     public GeminiScan Read(CancellationToken cancellation = default)
     {
         var bySession = new Dictionary<string, SessionMetadata>(StringComparer.OrdinalIgnoreCase);

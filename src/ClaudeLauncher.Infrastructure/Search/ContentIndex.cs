@@ -161,15 +161,16 @@ public sealed class ContentIndex : IDisposable
         lock (_gate) known = LoadKnown();
 
         // What has to be read, decided before reading anything.
-        var work = new List<(Source Source, FileInfo Info, Known? Before)>();
+        var work = new List<(Source Source, (long Length, long Written) Info, Known? Before)>();
         foreach (var source in sources)
         {
             cancellation.ThrowIfCancellationRequested();
-            FileInfo info;
+            (long Length, long Written) info;
             try
             {
-                info = new FileInfo(source.TranscriptPath);
-                if (!info.Exists) continue;
+                // A packed copy says what it holds unpacked: offsets are the plain transcript's.
+                if (TranscriptFiles.Stat(source.TranscriptPath) is not { } stat) continue;
+                info = stat;
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
@@ -177,8 +178,21 @@ public sealed class ContentIndex : IDisposable
             }
             known.TryGetValue(source.Conversation, out var before);
             if (before is not null && before.Path == source.TranscriptPath && before.OnlySession == source.Part.Stored
-                && before.Length == info.Length && before.Written == info.LastWriteTimeUtc.Ticks)
+                && before.Length == info.Length && before.Written == info.Written)
                 continue;
+            if (before is not null && before.OnlySession == source.Part.Stored && before.Length == info.Length
+                && PackedCopy.IsPackingOf(source.TranscriptPath, before.Path))
+            {
+                // The same transcript, packed since it was read: only its name changed.
+                lock (_gate)
+                {
+                    using var tx = _connection.BeginTransaction();
+                    SaveKnown(tx, before.Id, source.TranscriptPath, info.Length, info.Written, before.NextOffset, before.NextMessage,
+                        before.OnlySession);
+                    tx.Commit();
+                }
+                continue;
+            }
             work.Add((source, info, before));
         }
 
@@ -190,11 +204,11 @@ public sealed class ContentIndex : IDisposable
             cancellation.ThrowIfCancellationRequested();
             progress?.Report((i, work.Count));
             var (source, info, before) = work[i];
-            var written = info.LastWriteTimeUtc.Ticks;
+            var written = info.Written;
 
             // Grown in place: read on from where the last pass stopped. Anything else starts over.
-            // A Gemini session is one document written again whole: there is nothing to read on from.
-            var append = !GeminiSession.IsSessionFile(source.TranscriptPath)
+            // A Gemini or dsh session is read whole: there is nothing to read on from.
+            var append = !WholeTranscript.Is(source.TranscriptPath)
                          && before is not null && before.Path == source.TranscriptPath && before.OnlySession == source.Part.Stored
                          && info.Length >= before.Length && before.NextOffset <= info.Length;
             IReadOnlyList<TranscriptEntry> entries;

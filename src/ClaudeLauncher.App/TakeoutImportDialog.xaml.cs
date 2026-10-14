@@ -16,6 +16,7 @@ public partial class TakeoutImportDialog : Window
 
     private Outcome _outcome = Outcome.Closed;
     private IReadOnlyList<string> _files = [];
+    private FoundExport? _found;
 
     private TakeoutImportDialog()
     {
@@ -27,6 +28,7 @@ public partial class TakeoutImportDialog : Window
     {
         var dialog = new TakeoutImportDialog { Owner = owner };
         var (conversations, prompts, last) = Describe(store);
+        dialog.Loaded += async (_, _) => await dialog.FindAsync(last);
         if (conversations > 0)
         {
             dialog.StatusLine.Text = $"已导入 {conversations} 段对话、{prompts} 条提问"
@@ -52,6 +54,25 @@ public partial class TakeoutImportDialog : Window
         {
             return (0, 0, null);
         }
+    }
+
+    /// <summary>Offers the newest Google Takeout with Gemini's activity in the Downloads folder, when it is newer than the last import.</summary>
+    private async Task FindAsync(DateTime? lastImport)
+    {
+        var found = await Task.Run(() => ExportFinder.Newest(ExportFinder.Kind.GeminiTakeout, ExportFinder.DownloadsFolder, lastImport));
+        if (found is null || !IsLoaded) return;
+        _found = found;
+        FoundText.Text = $"下载文件夹里有一份{(lastImport is null ? "" : "新的")} Google Takeout 导出：{Path.GetFileName(found.Path)}"
+                         + $"（{found.Saved:MM-dd HH:mm} 下载，{found.Bytes / (1024.0 * 1024):0.#}\u00A0MB）";
+        FoundPanel.Visibility = Visibility.Visible;
+    }
+
+    private void ImportFound_Click(object sender, RoutedEventArgs e)
+    {
+        if (_found is null) return;
+        _files = [_found.Path];
+        _outcome = Outcome.Import;
+        DialogResult = true;
     }
 
     private void OpenTakeout_Click(object sender, RoutedEventArgs e)

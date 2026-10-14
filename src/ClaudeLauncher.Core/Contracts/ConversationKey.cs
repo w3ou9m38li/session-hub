@@ -25,6 +25,15 @@ public sealed record ConversationKey(
     /// <summary>A conversation from Gemini on the web, imported from a Google Takeout export into this tool's own data root.</summary>
     public const string GeminiWeb = "gemini-web";
 
+    /// <summary>A conversation from ChatGPT on the web (chatgpt.com), imported from ChatGPT's data export into this tool's own data root.</summary>
+    public const string ChatGptWeb = "chatgpt-web";
+
+    /// <summary>A conversation from Claude on the web (claude.ai), imported from Claude's data export into this tool's own data root.</summary>
+    public const string ClaudeWeb = "claude-web";
+
+    /// <summary>A DeepSeek Harness session, read from its home (<c>DSH_HOME</c>, else <c>~\.dsh</c>) under <c>sessions</c>.</summary>
+    public const string DeepSeek = "dsh";
+
     /// <summary>True for the two Claude backends that have a transcript on this machine.</summary>
     public static bool IsClaude(string backend) => backend is DesktopCode or CliCode;
 

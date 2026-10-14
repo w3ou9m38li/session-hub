@@ -13,8 +13,14 @@ using Visibility = System.Windows.Visibility;
 
 namespace ClaudeLauncher.App;
 
-/// <summary>A day's (or a month's) bar: heights in pixels, every app to one scale.</summary>
-public sealed record UsageBar(string Label, string Tip, double ClaudeHeight, double CodexHeight, double GeminiHeight);
+/// <summary>A day's (or a month's) bar: one segment per app, top first, heights in pixels, every app to one scale.</summary>
+public sealed record UsageBar(string Label, string Tip, IReadOnlyList<UsageSegment> Segments);
+
+/// <summary>One app's share of a bar.</summary>
+public sealed record UsageSegment(Brush Fill, double Height);
+
+/// <summary>One app in the chart's legend.</summary>
+public sealed record UsageLegendEntry(Brush Fill, string Name);
 
 /// <summary>A ranked line: a model, a folder or a conversation, and its share of the largest.</summary>
 public sealed record UsageRank(string Name, string Note, string Amount, string Tip, GridLength Bar, GridLength Rest,
@@ -25,7 +31,7 @@ public sealed record UsageRank(string Name, string Note, string Amount, string T
 }
 
 /// <summary>
-/// How many tokens Claude, Codex and Gemini CLI used on this computer — by day, model, folder and
+/// How many tokens each app on this computer used — Claude, Codex, Gemini CLI, DeepSeek Harness — by day, model, folder and
 /// conversation — read from the transcripts on demand. One window; opening it again brings it
 /// forward and reads what is new.
 /// </summary>
@@ -38,10 +44,14 @@ public partial class UsageWindow : Window
     private MainViewModel.UsageReport? _report;
     private CancellationTokenSource? _loading;
     private int _days;
-    private UsageApp? _app;
+    private AppFamily? _app;
+    private bool _perCall;
     private bool _ready;
 
     private const double ChartHeight = 112;
+
+    /// <summary>A conversation is ranked by its context per call only after this many calls: one or two say little.</summary>
+    private const int CallsForPerCall = 5;
 
     /// <param name="locate">Shows a conversation in the list.</param>
     public static void ShowFor(Window anchor, MainViewModel vm, Action<SessionMetadata> locate)
@@ -76,7 +86,24 @@ public partial class UsageWindow : Window
         _days = settings.UsageDays;
         _app = AppOf(settings.UsageApp);
         (_days switch { 1 => RangeToday, 7 => RangeWeek, 90 => RangeQuarter, 0 => RangeAll, _ => RangeMonth }).IsChecked = true;
-        (_app switch { UsageApp.Claude => AppClaude, UsageApp.Codex => AppCodex, UsageApp.Gemini => AppGemini, _ => AppBoth }).IsChecked = true;
+        AppBoth.IsChecked = _app is null;
+        _perCall = settings.UsageRank == "PerCall";
+        (_perCall ? RankPerCall : RankTotal).IsChecked = true;
+        foreach (var family in Sources.Families)
+        {
+            var button = new RadioButton
+            {
+                Style = (Style)FindResource("SegmentButton"),
+                GroupName = "App",
+                Tag = family.Family.ToString(),
+                Content = family.UsageName,
+                ToolTip = family.FilterName,
+                IsChecked = _app == family.Family,
+            };
+            button.Checked += App_Checked;
+            AppButtons.Children.Add(button);
+        }
+        Legend.ItemsSource = Sources.Families.Select(f => new UsageLegendEntry(Palette.BarOf(f.Family), f.UsageName)).ToList();
         _ready = true;
 
         Closing += (_, _) => AppSettings.Update(s => s with { UsageWindow = WindowPlacementMemory.Capture(this) });
@@ -160,27 +187,21 @@ public partial class UsageWindow : Window
         Render();
     }
 
-    private static UsageApp? AppOf(string? name) => name switch
+    private void Rank_Checked(object sender, RoutedEventArgs e)
     {
-        "Claude" => UsageApp.Claude,
-        "Codex" => UsageApp.Codex,
-        "Gemini" => UsageApp.Gemini,
-        _ => null,
-    };
+        if (!_ready || sender is not RadioButton { Tag: string tag }) return;
+        _perCall = tag == "PerCall";
+        AppSettings.Update(s => s with { UsageRank = _perCall ? "PerCall" : null });
+        Render();
+    }
 
-    private static string AppLabel(UsageApp app) => app switch
-    {
-        UsageApp.Codex => "Codex",
-        UsageApp.Gemini => "Gemini",
-        _ => "Claude",
-    };
+    /// <summary>The family a remembered name stands for; null (every app) for anything else.</summary>
+    private static AppFamily? AppOf(string? name) =>
+        Sources.Families.FirstOrDefault(f => f.Family.ToString() == name)?.Family;
 
-    private static Brush AppBrush(UsageApp app) => app switch
-    {
-        UsageApp.Codex => Palette.CodexText,
-        UsageApp.Gemini => Palette.GeminiText,
-        _ => Palette.ClaudeText,
-    };
+    private static string AppLabel(AppFamily app) => Sources.Of(app).UsageName;
+
+    private static Brush AppBrush(AppFamily app) => Palette.TextOf(app);
 
     private void Rank_MouseDown(object sender, MouseButtonEventArgs e)
     {
@@ -210,6 +231,8 @@ public partial class UsageWindow : Window
         CacheReadNote.Text = total.Total > 0 ? $"占合计 {(double)total.CacheRead / total.Total:P0}" : "每次调用重读的上下文";
         CacheWriteValue.Text = Tokens(total.CacheWrite);
         OutputValue.Text = Tokens(total.Output);
+        ContextValue.Text = total.Calls > 0 ? Tokens((long)total.ContextPerCall) : "—";
+        ContextNote.Text = total.Context > 0 ? $"缓存命中 {total.CacheHit:P0}" : "每次调用平均读入";
 
         RenderChart(usage, since, today);
 
@@ -239,7 +262,7 @@ public partial class UsageWindow : Window
             return (name, parent is null ? "" : "　" + parent, g.Key, Palette.Info, null);
         });
 
-        ConversationList.ItemsSource = Rank(usage.GroupBy(u => u.Conversation), 60, g =>
+        ConversationList.ItemsSource = Rank(usage.GroupBy(u => u.Conversation), 60, perCall: _perCall, describe: g =>
         {
             var app = g.First().App;
             if (rows.TryGetValue(g.Key, out var row))
@@ -289,48 +312,58 @@ public partial class UsageWindow : Window
             var inBucket = usage.Where(u => byMonth
                 ? u.Day.Year == b.From.Year && u.Day.Month == b.From.Month
                 : u.Day == b.From).ToList();
-            return (Claude: Sum(inBucket.Where(u => u.App == UsageApp.Claude)),
-                    Codex: Sum(inBucket.Where(u => u.App == UsageApp.Codex)),
-                    Gemini: Sum(inBucket.Where(u => u.App == UsageApp.Gemini)));
+            return Sources.Families.Select(f => (f.Family, Name: f.UsageName, Tokens: Sum(inBucket.Where(u => u.App == f.Family))))
+                .ToList();
         }).ToList();
-        var peak = Math.Max(1, sums.Count == 0 ? 1 : sums.Max(s => s.Claude.Total + s.Codex.Total + s.Gemini.Total));
+        var peak = Math.Max(1, sums.Count == 0 ? 1 : sums.Max(s => s.Sum(a => a.Tokens.Total)));
         var step = buckets.Count <= 12 ? 1 : buckets.Count <= 31 ? 5 : buckets.Count <= 92 ? 15 : (int)Math.Ceiling(buckets.Count / 8.0);
 
         Chart.ItemsSource = buckets.Select((b, i) =>
         {
-            var (claude, codex, gemini) = sums[i];
-            var all = claude + codex + gemini;
-            var apps = new[] { ("Claude", claude), ("Codex", codex), ("Gemini", gemini) }.Where(a => a.Item2.Calls > 0).ToList();
+            var apps = sums[i];
+            var all = new TokenCounts();
+            foreach (var a in apps) all += a.Tokens;
+            var used = apps.Where(a => a.Tokens.Calls > 0).ToList();
             var tip = $"{b.Name}\n合计 {Tokens(all.Total)}　·　{all.Calls:N0} 次调用"
-                      + (apps.Count > 1 ? "\n" + string.Join("　·　", apps.Select(a => $"{a.Item1} {Tokens(a.Item2.Total)}")) : "")
+                      + (used.Count > 1 ? "\n" + string.Join("　·　", used.Select(a => $"{a.Name} {Tokens(a.Tokens.Total)}")) : "")
                       + (all.Calls > 0 ? $"\n输入 {Tokens(all.Input)}　缓存读取 {Tokens(all.CacheRead)}　缓存写入 {Tokens(all.CacheWrite)}　输出 {Tokens(all.Output)}" : "");
-            return new UsageBar((buckets.Count - 1 - i) % step == 0 ? b.Label : "", tip,
-                ChartHeight * claude.Total / peak, ChartHeight * codex.Total / peak, ChartHeight * gemini.Total / peak);
+            // Top first: the stack is drawn from the top, so the first family sits at the bottom.
+            var segments = apps.AsEnumerable().Reverse()
+                .Select(a => new UsageSegment(Palette.BarOf(a.Family), ChartHeight * a.Tokens.Total / peak)).ToList();
+            return new UsageBar((buckets.Count - 1 - i) % step == 0 ? b.Label : "", tip, segments);
         }).ToList();
 
         ChartTitle.Text = byMonth ? "按月" : "按天";
-        var top = sums.Select((s, i) => (Total: s.Claude.Total + s.Codex.Total + s.Gemini.Total, i)).MaxBy(x => x.Total);
+        var top = sums.Select((s, i) => (Total: s.Sum(a => a.Tokens.Total), i)).MaxBy(x => x.Total);
         ChartPeak.Text = top.Total > 0 ? $"最多的一{(byMonth ? "个月" : "天")}：{buckets[top.i].Name}，{Tokens(top.Total)}" : "";
     }
 
-    /// <summary>The largest groups first, each with its share of the first.</summary>
+    /// <summary>
+    /// The largest groups first, each with its share of the first: by tokens in all, or — per call —
+    /// by the context a call read on average, among the groups with enough calls to say.
+    /// </summary>
     private static List<UsageRank> Rank(IEnumerable<IGrouping<string, UsageRow>> groups, int take,
-        Func<IGrouping<string, UsageRow>, (string Name, string Note, string Tip, Brush Brush, SessionMetadata? Row)> describe)
+        Func<IGrouping<string, UsageRow>, (string Name, string Note, string Tip, Brush Brush, SessionMetadata? Row)> describe,
+        bool perCall = false)
     {
-        var ranked = groups.Select(g => (Group: g, Tokens: Sum(g))).OrderByDescending(x => x.Tokens.Total).Take(take).ToList();
-        var largest = Math.Max(1, ranked.Count == 0 ? 1 : ranked[0].Tokens.Total);
+        double Measure(TokenCounts t) => perCall ? t.ContextPerCall : t.Total;
+        var ranked = groups.Select(g => (Group: g, Tokens: Sum(g)))
+            .Where(x => !perCall || x.Tokens.Calls >= CallsForPerCall)
+            .OrderByDescending(x => Measure(x.Tokens)).Take(take).ToList();
+        var largest = Math.Max(1, ranked.Count == 0 ? 1 : Measure(ranked[0].Tokens));
         return ranked.Select(x =>
         {
             var (name, note, tip, brush, row) = describe(x.Group);
-            var share = (double)x.Tokens.Total / largest;
-            return new UsageRank(name, note, Tokens(x.Tokens.Total),
+            var share = Measure(x.Tokens) / largest;
+            return new UsageRank(name, note, perCall ? Tokens((long)x.Tokens.ContextPerCall) + "/次" : Tokens(x.Tokens.Total),
                 tip + "\n" + Breakdown(x.Tokens) + (row is null ? "" : "\n双击在列表中定位"),
                 new GridLength(share, GridUnitType.Star), new GridLength(1 - share, GridUnitType.Star), brush, row);
         }).ToList();
     }
 
     private static string Breakdown(TokenCounts t) =>
-        $"合计 {Tokens(t.Total)}　·　{t.Calls:N0} 次调用\n输入 {Tokens(t.Input)}　缓存读取 {Tokens(t.CacheRead)}　缓存写入 {Tokens(t.CacheWrite)}　输出 {Tokens(t.Output)}";
+        $"合计 {Tokens(t.Total)}　·　{t.Calls:N0} 次调用\n输入 {Tokens(t.Input)}　缓存读取 {Tokens(t.CacheRead)}　缓存写入 {Tokens(t.CacheWrite)}　输出 {Tokens(t.Output)}"
+        + (t.Calls > 0 ? $"\n每次上下文平均 {Tokens((long)t.ContextPerCall)}　·　缓存命中 {t.CacheHit:P0}" : "");
 
     private static TokenCounts Sum(IEnumerable<UsageRow> rows)
     {

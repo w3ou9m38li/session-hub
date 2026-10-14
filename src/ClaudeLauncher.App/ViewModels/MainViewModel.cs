@@ -3,6 +3,7 @@ using System.Collections.Specialized;
 using System.ComponentModel;
 using System.IO;
 using System.Runtime.CompilerServices;
+using System.Text;
 using ClaudeLauncher.Core.Catalog;
 using ClaudeLauncher.Core.Contracts;
 using ClaudeLauncher.Infrastructure;
@@ -117,7 +118,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         _status = new StatusMessage(_startupNotice ?? "正在读取会话目录…", StatusTone.Busy);
 
         _sync = new CatalogSyncService(_catalog, LauncherPaths.ClaudeConfigDir, GeminiPaths.Discover(),
-            new GeminiTakeoutStore(LauncherPaths.GeminiTakeoutStore), LauncherPaths.ProbeCacheFile);
+            new GeminiTakeoutStore(LauncherPaths.GeminiTakeoutStore), LauncherPaths.ProbeCacheFile,
+            () => DshPaths.Discover(AppSettings.Current.DshHomes), WebExportStore.InDataRoot());
         _apps = new InstalledApps(
             new ClaudeInstallation { Found = false, FailureReason = "尚未探测" },
             new ChatGptInstallation { Found = false, FailureReason = "尚未探测" });
@@ -297,7 +299,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     public bool IsFiltered =>
         !string.IsNullOrWhiteSpace(SearchText)
         || _selectedGroupOption.Filter.Kind != GroupFilterKind.All
-        || CurrentBackend.Kind != BackendFilterKind.All
+        || !CurrentBackend.IsAll
         || _selectedTimeOption.Window != TimeWindow.All;
 
     private TimeOptionViewModel _selectedTimeOption = TimeOptionViewModel.All[0];
@@ -335,7 +337,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// </summary>
     public void UseBackendFilter(string? kind)
     {
-        if (BackendOptionViewModel.All.FirstOrDefault(o => o.Filter.Kind.ToString() == kind) is not { } option) return;
+        if (BackendOptionViewModel.All.FirstOrDefault(o => o.Filter.Name == kind) is not { } option) return;
         _selectedBackendOption = option;
         OnPropertyChanged(nameof(SelectedBackendOption));
     }
@@ -374,6 +376,39 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         return result;
     }
 
+    /// <summary>
+    /// The user's own entry point to DeepSeek Harness — its shortcut, or the start script beside a
+    /// home — when there is one; null hides 「打开 DeepSeek」. Looked for again when the homes change.
+    /// </summary>
+    public string? DeepSeekLaunchTarget
+    {
+        get => _deepSeekLaunchTarget;
+        private set
+        {
+            if (_deepSeekLaunchTarget == value) return;
+            _deepSeekLaunchTarget = value;
+            SessionRowViewModel.CanStartApp = source => source.Family == AppFamily.DeepSeek && value is not null;
+            OnPropertyChanged();
+        }
+    }
+    private string? _deepSeekLaunchTarget;
+
+    public async Task FindDeepSeekAsync()
+    {
+        var homes = AppSettings.Current.DshHomes;
+        DeepSeekLaunchTarget = await Task.Run(() => DeepSeekHarnessLauncher.Find(DshPaths.Discover(homes).Homes));
+    }
+
+    /// <summary>Starts DeepSeek Harness through the user's own entry point: it opens in the browser, signed in.</summary>
+    public async Task<LaunchResult> OpenDeepSeekAsync()
+    {
+        if (DeepSeekLaunchTarget is null || !File.Exists(DeepSeekLaunchTarget)) await FindDeepSeekAsync();
+        var target = DeepSeekLaunchTarget;
+        var result = await Task.Run(() => DeepSeekHarnessLauncher.Open(target));
+        Report(result.Message, Launched(result) ? StatusTone.Success : StatusTone.Error);
+        return result;
+    }
+
     private static bool Launched(LaunchResult result) =>
         result.Outcome is LaunchOutcome.ActivationRequested or LaunchOutcome.AlreadyRunning;
 
@@ -405,16 +440,33 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// </summary>
     public async Task<DeepLinkResult> OpenInAppAsync(SessionRowViewModel row)
     {
-        if (row.IsGeminiWeb)
+        if (row.Source.Open == OpenRoute.AppOnly)
         {
-            var shown = GeminiWebLink.Open(row.Metadata.Key.NativeSessionId);
+            // No link reaches one conversation: the app is opened, and where to find it said.
+            if (row.Source.Family != AppFamily.DeepSeek)
+                return new DeepLinkResult(DeepLinkOutcome.UnsupportedBackend, row.OpenInAppTooltip);
+            var started = await OpenDeepSeekAsync();
+            if (!Launched(started))
+                return new DeepLinkResult(DeepLinkOutcome.Failed, started.Message);
+            var where = row.Metadata.ProjectRef is { Length: > 0 } folder ? $"工作目录 {folder} 下的" : "";
+            var message = $"已请求打开 {row.AppName}：在它的侧边栏里找{where}「{row.Metadata.Title}」";
+            Report(message, StatusTone.Success);
+            return new DeepLinkResult(DeepLinkOutcome.Requested, message);
+        }
+
+        if (row.Source.Open == OpenRoute.None)
+            return new DeepLinkResult(DeepLinkOutcome.UnsupportedBackend, row.OpenInAppTooltip);
+
+        if (row.Source.Open == OpenRoute.WebLink)
+        {
+            var shown = WebLinks.Open(row.Metadata.Key.Backend, row.Metadata.Key.NativeSessionId);
             Report(shown.Outcome == DeepLinkOutcome.Requested ? $"{shown.Message}：「{row.Metadata.Title}」" : shown.Message,
                 shown.Outcome == DeepLinkOutcome.Requested ? StatusTone.Success : StatusTone.Error);
             return shown;
         }
 
         var apps = await AppsAsync();
-        if (row.IsCodex)
+        if (row.Source.Open == OpenRoute.CodexLink)
         {
             if (!ChatGptDeepLink.CanOpen(row.Metadata.Key.NativeSessionId))
             {
@@ -470,11 +522,14 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var apps = await AppsAsync();
         var cwd = row.Metadata.ProjectRef ?? string.Empty;
         Report("正在打开终端…", StatusTone.Busy);
-        var result = await Task.Run(() => row.IsCodex
-            ? CodexSessionLauncher.Resume(row.Metadata.Key.NativeSessionId, cwd,
-                managedAppRoot: apps.ChatGpt.ManagedAppRoot, storeInstallLocation: apps.ChatGpt.InstallLocation)
-            : row.IsGemini ? GeminiSessionLauncher.Resume(row.Metadata.Key.NativeSessionId, cwd)
-            : CliSessionLauncher.Resume(row.CliSessionId, cwd, profileRoot: apps.Claude.ProfileRoot));
+        var result = await Task.Run(() => row.Source.Resume switch
+        {
+            ResumeRoute.CodexCli => CodexSessionLauncher.Resume(row.Metadata.Key.NativeSessionId, cwd,
+                managedAppRoot: apps.ChatGpt.ManagedAppRoot, storeInstallLocation: apps.ChatGpt.InstallLocation),
+            ResumeRoute.GeminiCli => GeminiSessionLauncher.Resume(row.Metadata.Key.NativeSessionId, cwd),
+            ResumeRoute.ClaudeCli => CliSessionLauncher.Resume(row.CliSessionId, cwd, profileRoot: apps.Claude.ProfileRoot),
+            _ => new ResumeResult(ResumeOutcome.Failed, row.ResumeTooltip),
+        });
         Report(result.Message, result.Outcome == ResumeOutcome.Started ? StatusTone.Success : StatusTone.Error);
         return result;
     }
@@ -486,6 +541,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         // Discovery asks PowerShell and can take a second or two; the cached catalog does not
         // depend on it, so the list is shown first and discovery finishes behind it.
         _discovery = Task.Run(() => WindowsAppDiscovery.Discover());
+        _ = FindDeepSeekAsync();
         await RefreshViewAsync();
 
         _apps = await _discovery;
@@ -649,10 +705,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     private bool _passesAgain;
 
     /// <summary>
-    /// What a sync sets going: the content index brought up to date, then the usage ledger —
-    /// one after the other. Side by side they took two processors and the memory of both at
-    /// once, and the window stuttered for as long as they ran. Memory a long pass went through
-    /// is handed back to the system once the user pauses.
+    /// What a sync sets going: the content index brought up to date, then the usage ledger, then
+    /// this tool's copies — one after the other. Side by side they took two processors and the
+    /// memory of both at once, and the window stuttered for as long as they ran. The copies come
+    /// last: their pass may take its whole twenty seconds, and the figures should not wait for
+    /// it. Memory a long pass went through is handed back to the system once the user pauses.
     /// </summary>
     private async Task RunBackgroundPassesAsync()
     {
@@ -668,8 +725,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             {
                 _passesAgain = false;
                 await IndexContentAsync();
-                await KeepCopiesAsync();
                 await RefreshUsageQuietlyAsync();
+                await KeepCopiesAsync();
 
                 if (MemoryRelief.IsDue && !_passesAgain && !_disposed)
                 {
@@ -706,8 +763,8 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
     /// <summary>
     /// After a sync, this tool's copy of every listed transcript is brought up to date: the
     /// first time all of them, twenty seconds at a time and oldest first (the first an app
-    /// cleans up); after that only what grew. A conversation whose app later deletes its record
-    /// stays readable here.
+    /// cleans up); after that only what grew. Time to spare packs copies from before copies were
+    /// packed. A conversation whose app later deletes its record stays readable here.
     /// </summary>
     private async Task KeepCopiesAsync()
     {
@@ -1125,12 +1182,10 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         var changes = !result.ChangedAnything ? "，没有变化"
             : (result.RowsChanged > 0 ? $"，{result.RowsChanged} 条新增或更新" : "")
               + (result.RowsRemoved > 0 ? $"，{result.RowsRemoved} 条的原记录已不在（列表里保留）" : "");
-        var gemini = (result.Coverage.Sources.Any(s => s.Backend == ConversationKey.Gemini)
-                ? $" · Gemini {Records(ConversationKey.Gemini)} 条" : "")
-            + (result.Coverage.Sources.Any(s => s.Backend == ConversationKey.GeminiWeb)
-                ? $" · Gemini 网页 {Records(ConversationKey.GeminiWeb)} 条" : "");
-        return $"同步完成：Claude 桌面 {Records(ConversationKey.DesktopCode)} 条 · 终端 {Records(ConversationKey.CliCode)} 条"
-            + $" · Codex {Records(ConversationKey.Codex)} 条{gemini}{changes}";
+        var counts = Sources.Read
+            .Where(source => source.AlwaysReported || result.Coverage.Sources.Any(s => s.Backend == source.Backend))
+            .Select(source => $"{source.ColumnName} {Records(source.Backend)} 条");
+        return "同步完成：" + string.Join(" · ", counts) + changes;
     }
 
     /// <summary>Rebuilds the group filter and then the list, in that order.</summary>
@@ -1167,21 +1222,24 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         var desktop = c.Sources.FirstOrDefault(s => s.Backend == ConversationKey.DesktopCode);
         var cli = c.Sources.FirstOrDefault(s => s.Backend == ConversationKey.CliCode);
-        var codex = c.Sources.FirstOrDefault(s => s.Backend == ConversationKey.Codex);
-        var gemini = c.Sources.FirstOrDefault(s => s.Backend == ConversationKey.Gemini);
-        var geminiWeb = c.Sources.FirstOrDefault(s => s.Backend == ConversationKey.GeminiWeb);
         if (desktop is { Coverage: SourceCoverage.Resolved } && cli is { Coverage: SourceCoverage.Resolved })
         {
-            var claudeUnique = desktop.Records + cli.Records - c.VerifiedDesktopCliLinks;
-            var codexCount = codex is { Coverage: SourceCoverage.Resolved } ? codex.Records : 0;
-            var geminiCount = (gemini is { Coverage: SourceCoverage.Resolved } ? gemini.Records : 0)
-                              + (geminiWeb is { Coverage: SourceCoverage.Resolved } ? geminiWeb.Records : 0);
-            items.Add(new($"本机不重复对话：{claudeUnique + codexCount + geminiCount} 个",
-                $"Claude 桌面 {desktop.Records} + 终端 {cli.Records} − 两边指向同一对话的 {c.VerifiedDesktopCliLinks}"
-                + (codex is { Coverage: SourceCoverage.Resolved } ? $"，加 Codex {codex.Records}" : "，Codex 本次未读到")
-                + (gemini is null ? "" : gemini.Coverage == SourceCoverage.Resolved ? $"，加 Gemini CLI {gemini.Records}" : "，Gemini CLI 本次没有完整读到")
-                + (geminiWeb is null ? "" : geminiWeb.Coverage == SourceCoverage.Resolved ? $"，加导入的 Gemini 网页版 {geminiWeb.Records}" : "，导入的 Gemini 网页版本次没有完整读到"),
-                CoverageTone.Ok));
+            // Claude's two views of one history overlap; every other source counts as it stands.
+            var distinct = desktop.Records + cli.Records - c.VerifiedDesktopCliLinks;
+            var detail = new StringBuilder(
+                $"Claude 桌面 {desktop.Records} + 终端 {cli.Records} − 两边指向同一对话的 {c.VerifiedDesktopCliLinks}");
+            foreach (var source in Sources.Read.Where(s => s.Family != AppFamily.Claude))
+            {
+                var tally = c.Sources.FirstOrDefault(s => s.Backend == source.Backend);
+                if (tally is { Coverage: SourceCoverage.Resolved })
+                {
+                    distinct += tally.Records;
+                    detail.Append($"，加 {source.ReportName} {tally.Records}");
+                }
+                else if (tally is not null || source.AlwaysReported)
+                    detail.Append($"，{source.ReportName} 本次没有完整读到");
+            }
+            items.Add(new($"本机不重复对话：{distinct} 个", detail.ToString(), CoverageTone.Ok));
         }
 
         items.Add(new($"桌面 ↔ 终端 已验证关联：{c.VerifiedDesktopCliLinks} 条",
@@ -1198,9 +1256,11 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             try
             {
-                var (copies, bytes) = archive.Size();
-                items.Add(new($"会话管家的副本：{copies} 份，{bytes / (1024.0 * 1024 * 1024):0.0} GB",
-                    "每条对话的记录文件，会话管家都在自己的数据目录里存一份（文件夹开了 NTFS 压缩）：应用删掉或清理了原记录，"
+                var size = archive.Size();
+                const double Gb = 1024.0 * 1024 * 1024;
+                items.Add(new($"会话管家的副本：{size.Copies} 份，记录共 {size.Bytes / Gb:0.0} GB，占用 {size.Stored / Gb:0.0} GB"
+                              + (size.Plain > 0 ? $"（还有 {size.Plain} 份旧副本等空闲时压缩）" : ""),
+                    "每条对话的记录文件，会话管家都在自己的数据目录里存一份（Zstandard 压缩，看和搜时直接读，不用先解压）：应用删掉或清理了原记录，"
                     + $"这里照样能看、能搜。只在你从会话管家删除对话时才删。{archive.Root}", CoverageTone.Neutral));
             }
             catch (Exception ex) when (ex is ObjectDisposedException or Microsoft.Data.Sqlite.SqliteException) { }
@@ -1210,9 +1270,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
 
         // The one-line answer for the collapsed report. Only the three sources this tool reads
         // count here; Chat and Cowork are listed in full below as "not read", by design.
-        var main = c.Sources.Where(s => s.Backend is ConversationKey.Codex or ConversationKey.DesktopCode
-                                                  or ConversationKey.CliCode or ConversationKey.Gemini
-                                                  or ConversationKey.GeminiWeb).ToList();
+        var main = c.Sources.Where(s => Sources.Of(s.Backend) is { Read: true }).ToList();
         var needsLook = main.Count(s => s.Coverage != SourceCoverage.Resolved)
             + c.Sources.Count(s => s.Backend.StartsWith(ConversationKey.CliCode + " (其他根)", StringComparison.Ordinal))
             + (c.UnknownSourceIds.Count > 0 ? 1 : 0);
@@ -1746,15 +1804,9 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
             SortField.Group => key.Length == 0
                 ? new SectionHeader("未分组", countText, "既没有本工具的分组，也没有应用自己的分组")
                 : new SectionHeader(key, countText),
-            SortField.Source => key switch
-            {
-                ConversationKey.DesktopCode => new SectionHeader("Claude · 桌面 Code", countText, "在 Claude 桌面版侧边栏里的会话"),
-                ConversationKey.CliCode => new SectionHeader("Claude · 终端 CLI", countText, "终端里 claude 命令留下的会话"),
-                ConversationKey.Codex => new SectionHeader("ChatGPT · Codex", countText, "ChatGPT 桌面版里的 Codex 任务"),
-                ConversationKey.Gemini => new SectionHeader("Gemini CLI", countText, "终端里 gemini 命令留下的会话"),
-                ConversationKey.GeminiWeb => new SectionHeader("Gemini 网页版", countText, "从 Google Takeout 导入的网页版 Gemini 对话"),
-                _ => new SectionHeader(BackendNames.Display(key), countText),
-            },
+            SortField.Source => Sources.Of(key) is { } source
+                ? new SectionHeader(source.SectionName, countText, source.SectionTooltip)
+                : new SectionHeader(BackendNames.Display(key), countText),
             SortField.Project => key.Length == 0
                 ? new SectionHeader("（没有记录工作目录）", countText)
                 : new SectionHeader(key, countText, key),
@@ -1824,7 +1876,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         {
             Sessions.Count >= TotalCount ? $"共 {TotalCount} 条" : $"已显示 {Sessions.Count} / 共 {TotalCount} 条",
         };
-        if (CurrentBackend.Kind != BackendFilterKind.All) parts.Add("只看 " + _selectedBackendOption.Display);
+        if (!CurrentBackend.IsAll) parts.Add("只看 " + _selectedBackendOption.Display);
         if (_selectedTimeOption.Window != TimeWindow.All) parts.Add(_selectedTimeOption.Display);
         if (_selectedGroupOption.Filter.Kind == GroupFilterKind.Named) parts.Add($"分组「{_selectedGroupOption.Filter.Name}」");
         else if (_selectedGroupOption.Filter.Kind == GroupFilterKind.Ungrouped) parts.Add("只看未分组");
@@ -1861,7 +1913,7 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
                         : _content is null ? $"标题、工作目录和会话 ID 里都没有「{search}」"
                         : _searchMineOnly ? $"标题、工作目录、会话 ID 和你说过的话里都没有「{search}」"
                         : $"标题、工作目录、会话 ID 和对话内容里都没有「{search}」")
-                    + (_selectedGroupOption.Filter.Kind != GroupFilterKind.All || CurrentBackend.Kind != BackendFilterKind.All
+                    + (_selectedGroupOption.Filter.Kind != GroupFilterKind.All || !CurrentBackend.IsAll
                        || _selectedTimeOption.Window != TimeWindow.All
                         ? "。当前还限定了应用、时间或分组，范围更小。" : "。多个词用空格隔开时，每个词都要出现。")
                     + (IndexProgress is null ? "" : "\n对话内容索引还在建立（" + IndexProgress.Replace("正在建立对话内容索引 ", "") + "），稍后可能找到更多。"),
@@ -2044,6 +2096,71 @@ public sealed class MainViewModel : INotifyPropertyChanged, IDisposable
         Report($"已导入 Gemini 网页版：这份导出有 {result.Found} 条提问，新增 {result.Added} 条；"
                + $"现在共 {result.Total} 条，{result.Conversations} 段对话。在「全部应用」里选「Gemini」只看 Gemini 的",
             StatusTone.Success);
+    }
+
+    /// <summary>
+    /// Imports ChatGPT's or Claude's conversations on the web from the data export the user
+    /// downloaded into this tool's own store, then lists them. The export is only read.
+    /// </summary>
+    public async Task ImportWebExportAsync(string backend, IReadOnlyList<string> exports)
+    {
+        var source = Sources.Describe(backend);
+        var app = source.Family == AppFamily.Claude ? "Claude" : "ChatGPT";
+        Report($"正在读取 {app} 的数据导出…", StatusTone.Busy);
+        WebExportImport result;
+        try
+        {
+            var store = WebExportStore.InDataRoot(backend);
+            var progress = new ThrottledProgress<int>(n => Report($"正在读取 {app} 的数据导出… 已读 {n:N0} 段对话", StatusTone.Busy),
+                _ => false);
+            result = await Task.Run(() => store.Import(exports, progress));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or InvalidDataException
+                                       or System.Text.Json.JsonException or NotSupportedException)
+        {
+            Report("导入失败：" + ex.Message, StatusTone.Error);
+            return;
+        }
+        if (result.Found == 0)
+        {
+            var other = app == "Claude" ? "ChatGPT" : "Claude";
+            Report(result.OtherKind
+                    ? $"这是 {other} 的导出，不是 {app} 的：在「⋯」菜单里选「导入 {other} 网页版…」"
+                    : result.ConversationFiles == 0
+                        ? $"这份文件里没有对话列表（conversations.json）：选 {app} 邮件里下载的导出压缩包，或解压出来的 conversations.json"
+                        : result.Unreadable > 0
+                            ? $"导出里的 {result.Unreadable} 段对话读不出来：格式和已知的不一样"
+                            : "导出里没有对话",
+                StatusTone.Warning);
+            return;
+        }
+        await SyncAsync(quiet: true);
+        Report($"已导入 {source.ReportName}：这份导出有 {result.Found} 段对话，新增 {result.Added} 段、更新 {result.Updated} 段；"
+               + $"现在共 {result.Total} 段"
+               + (result.Unreadable > 0 ? $"（另有 {result.Unreadable} 段读不出来）" : "")
+               + $"。在「全部应用」里选「{Sources.Of(source.Family).FilterName}」只看这一家的",
+            StatusTone.Success);
+    }
+
+    /// <summary>Removes the imported copy of ChatGPT's or Claude's conversations; theirs on the web are untouched.</summary>
+    public async Task RemoveWebExportAsync(string backend)
+    {
+        var source = Sources.Describe(backend);
+        int removed;
+        try
+        {
+            var store = WebExportStore.InDataRoot(backend);
+            removed = await Task.Run(store.Remove);
+            // Removed on purpose: not kept as "gone from the app" the way a cleaned-up record is.
+            await OnCatalog(() => _catalog.Forget(backend));
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            Report("移除失败：" + ex.Message, StatusTone.Error);
+            return;
+        }
+        await SyncAsync(quiet: true);
+        Report($"已移除导入的 {source.ReportName} 记录（{removed} 段对话）", StatusTone.Success);
     }
 
     /// <summary>Removes the imported copy of Gemini's web history; Google's own records are untouched.</summary>

@@ -99,15 +99,7 @@ public static class SessionExporter
     private static bool InSidebar(SessionMetadata row) =>
         row.Key.Backend is ConversationKey.DesktopCode or ConversationKey.Codex;
 
-    private static string SourceName(SessionMetadata row) => row.Key.Backend switch
-    {
-        ConversationKey.DesktopCode => "Claude 桌面",
-        ConversationKey.CliCode => "Claude 终端",
-        ConversationKey.Codex => "Codex",
-        ConversationKey.Gemini => "Gemini CLI",
-        ConversationKey.GeminiWeb => "Gemini 网页版",
-        var other => other,
-    };
+    private static string SourceName(SessionMetadata row) => Sources.Of(row.Key.Backend)?.ExportName ?? row.Key.Backend;
 
     public static ExportResult Write(
         IReadOnlyList<SessionMetadata> rows, string claudeConfigDir, string outputDirectory)

@@ -111,6 +111,12 @@ public static class LauncherPaths
     /// </summary>
     public static string GeminiTakeoutStore => Path.Combine(DataRoot, "gemini-web");
 
+    /// <summary>ChatGPT's conversations on the web, imported from its data export. Not derived, for the same reason.</summary>
+    public static string ChatGptWebStore => Path.Combine(DataRoot, "chatgpt-web");
+
+    /// <summary>Claude's conversations on the web, imported from its data export. Not derived either.</summary>
+    public static string ClaudeWebStore => Path.Combine(DataRoot, "claude-web");
+
     /// <summary>
     /// This tool's own copy of every transcript it lists, kept so a conversation stays readable
     /// after its app deletes or cleans up the record. Not derived: deleting it loses whatever

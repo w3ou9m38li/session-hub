@@ -92,6 +92,8 @@ internal static class Theme
         ["CodexBrush"] = 0xFF3F7F6E,
         ["CodexLineBrush"] = 0xFF2F6B5B,
         ["GeminiBrush"] = 0xFF5B6FC9,
+        ["DeepSeekBrush"] = 0xFF8A5CC2,
+        ["DeepSeekLineBrush"] = 0xFF7448AE,
         ["InfoBrush"] = 0xFF22668A,
         ["SuccessBrush"] = 0xFF2B7A47,
         ["WarnBrush"] = 0xFFA65F12,
@@ -143,6 +145,8 @@ internal static class Theme
         ["CodexFillBrush"] = 0xFF356E5F,
         ["GeminiTextBrush"] = 0xFF3F55B5,
         ["GeminiFillBrush"] = 0xFF4A5CB0,
+        ["DeepSeekTextBrush"] = 0xFF6B3FB0,
+        ["DeepSeekFillBrush"] = 0xFF6E4AA8,
     };
 
     /// <summary>The names above, for a test that Dark.xaml defines every one of them.</summary>

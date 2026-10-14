@@ -271,7 +271,7 @@ public sealed class GeminiSessionTests : IDisposable
             new { id = "i1", timestamp = "2026-10-01T08:00:40Z", type = "info", content = "没有 tokens 的提示" },
         ];
         var path = Session("p", IdA, once);
-        ledger.Update([new("g", path, UsageApp.Gemini)]);
+        ledger.Update([new("g", path, AppFamily.Gemini)]);
         var counted = Total(ledger);
         Assert.Equal(1, counted.Calls);
         Assert.Equal(400 + 5, counted.Input);                           // input less what came from the cache, plus tools
@@ -286,13 +286,13 @@ public sealed class GeminiSessionTests : IDisposable
             User("u2", "2026-10-01T08:01:00Z", Words("再问")),
             Model("m2", "2026-10-01T08:01:30Z", "再答", Tokens(input: 2000, cached: 1500, output: 100)),
         ]);
-        ledger.Update([new("g", path, UsageApp.Gemini)]);
+        ledger.Update([new("g", path, AppFamily.Gemini)]);
         counted = Total(ledger);
         Assert.Equal(2, counted.Calls);
         Assert.Equal(405 + 500, counted.Input);
         Assert.Equal(2100, counted.CacheRead);
         Assert.Equal(180, counted.Output);
-        Assert.All(ledger.Rows(), r => Assert.Equal(UsageApp.Gemini, r.App));
+        Assert.All(ledger.Rows(), r => Assert.Equal(AppFamily.Gemini, r.App));
         Assert.Equal(["gemini-3-pro"], ledger.Rows().Select(r => r.Model).Distinct().ToArray());
     }
 

@@ -1,3 +1,4 @@
+using ClaudeLauncher.Core.Contracts;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -5,8 +6,6 @@ using ClaudeLauncher.Infrastructure.Backends;
 
 namespace ClaudeLauncher.Infrastructure.Usage;
 
-/// <summary>Which app wrote a file: they record usage differently.</summary>
-public enum UsageApp { Claude = 0, Codex = 1, Gemini = 2 }
 
 /// <summary>
 /// One call to a model as its transcript recorded it: when, which model, and its tokens.
@@ -46,13 +45,13 @@ public static class UsageScanner
 
     /// <param name="state">What an earlier read of the same file left: Codex's model and running totals.</param>
     /// <param name="rootOf">For a forked Codex thread, the thread its parent is counted under, when known.</param>
-    public static UsageScan Scan(string path, UsageApp app, long offset, string? state,
+    public static UsageScan Scan(string path, AppFamily app, long offset, string? state,
         Func<string, string?>? rootOf = null, CancellationToken cancellation = default)
     {
-        if (app == UsageApp.Gemini) return ScanGemini(path, cancellation);
+        if (app == AppFamily.Gemini) return ScanGemini(path, cancellation);
+        if (app == AppFamily.DeepSeek) return ScanDsh(path, cancellation);
 
-        using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan);
+        using var stream = TranscriptFiles.OpenSeekable(path, 1, FileOptions.SequentialScan);
         if (offset < 0 || offset > stream.Length)
         {
             offset = 0;
@@ -60,7 +59,7 @@ public static class UsageScanner
         }
         stream.Position = offset;
 
-        var codex = app == UsageApp.Codex ? CodexState.Parse(state) : null;
+        var codex = app == AppFamily.Codex ? CodexState.Parse(state) : null;
         var calls = new List<UsageCall>();
         using var line = new PooledBytes();
         var skipping = false;
@@ -85,7 +84,7 @@ public static class UsageScanner
                         // Past a glance, only a line that can carry usage is held: most bytes are tool
                         // output, which never does.
                         var worth = length <= Glance || MayCarryUsage(PooledBytes.Head(line.WrittenSpan, piece, Glance, scratch), app);
-                        if (worth && (length <= MaxLineBytes || (length <= MaxAssistantLineBytes && app == UsageApp.Claude)))
+                        if (worth && (length <= MaxLineBytes || (length <= MaxAssistantLineBytes && app == AppFamily.Claude)))
                             line.Write(piece);
                         else
                         {
@@ -122,8 +121,8 @@ public static class UsageScanner
     /// Whether a line's head says it can carry usage: a Claude assistant message; a Codex token
     /// count, or the turn context and session header that say whose tokens they are.
     /// </summary>
-    private static bool MayCarryUsage(ReadOnlySpan<byte> head, UsageApp app) =>
-        app == UsageApp.Claude
+    private static bool MayCarryUsage(ReadOnlySpan<byte> head, AppFamily app) =>
+        app == AppFamily.Claude
             ? head.IndexOf(AssistantRole) >= 0
             : head.IndexOf(TokenCountType) >= 0 || head.IndexOf(TurnContextType) >= 0 || head.IndexOf(SessionMetaType) >= 0;
 
@@ -323,7 +322,22 @@ public static class UsageScanner
             .Select(c => new UsageCall(Hash("gemini:" + c.Id), c.When, c.Model.Length > 0 ? c.Model : "unknown",
                 Input: Math.Max(0, c.Input - c.Cached) + c.Tool, CacheWrite: 0, CacheRead: c.Cached, Output: c.Output + c.Thoughts))
             .ToList();
-        return new UsageScan(calls, new FileInfo(path).Length, null);
+        return new UsageScan(calls, TranscriptFiles.Stat(path)?.Length ?? 0, null);
+    }
+
+    /// <summary>
+    /// A DeepSeek Harness session, read whole. Each model message records its tokens, disjoint:
+    /// <c>inputTokens</c> is the prompt not served from the cache, the cache's share is apart, and
+    /// the reasoning is already in <c>outputTokens</c>. A message copied into another session
+    /// keeps its id, so it counts once.
+    /// </summary>
+    private static UsageScan ScanDsh(string path, CancellationToken cancellation)
+    {
+        var calls = DshSession.ReadCalls(path, cancellation)
+            .Select(c => new UsageCall(Hash("dsh:" + c.Id), c.When, c.Model.Length > 0 ? c.Model : "unknown",
+                Input: c.Input, CacheWrite: c.CacheWrite, CacheRead: c.CacheRead, Output: c.Output))
+            .ToList();
+        return new UsageScan(calls, TranscriptFiles.Stat(path)?.Length ?? 0, null);
     }
 
     /// <summary>FNV-1a over the key's UTF-8: 64 bits, so a hundred thousand calls never collide in practice.</summary>

@@ -80,7 +80,7 @@ public readonly record struct OwnPart(string? Session, bool AfterFork)
         {
             try
             {
-                using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+                using var stream = TranscriptFiles.OpenRead(path);
                 var buffer = new byte[256];
                 var length = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
                 return Timestamp(buffer.AsSpan(0, length));

@@ -1,3 +1,4 @@
+using System.Buffers;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
@@ -79,9 +80,10 @@ public sealed record GeminiCall(string Id, DateTimeOffset When, string Model, lo
 /// </summary>
 public static class GeminiSession
 {
-    /// <summary>Whether a transcript path is a Gemini session: the only transcripts that are not JSON lines.</summary>
+    /// <summary>Whether a transcript path is a Gemini session (one JSON document), or this tool's packed copy of one.</summary>
     public static bool IsSessionFile(string? path) =>
-        path is not null && path.EndsWith(".json", StringComparison.OrdinalIgnoreCase);
+        path is not null && (path.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+                             || path.EndsWith(".json" + PackedCopy.Suffix, StringComparison.OrdinalIgnoreCase));
 
     private static readonly JsonDocumentOptions Json = new() { MaxDepth = 256 };
 
@@ -92,8 +94,7 @@ public static class GeminiSession
     /// </summary>
     private static JsonDocument Open(string path)
     {
-        using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 64 * 1024, FileOptions.SequentialScan);
+        using var stream = TranscriptFiles.OpenRead(path);
         try
         {
             return JsonDocument.Parse(stream, Json);
@@ -105,7 +106,10 @@ public static class GeminiSession
     }
 
     /// <summary>The header of a session; null when the file is not one (no id, no messages).</summary>
-    public static GeminiSessionHeader? ReadHeader(string path)
+    public static GeminiSessionHeader? ReadHeader(string path) => QuickHeader(path) ?? ReadHeaderWhole(path);
+
+    /// <summary>The header, from the whole document.</summary>
+    internal static GeminiSessionHeader? ReadHeaderWhole(string path)
     {
         using var doc = Open(path);
         var root = doc.RootElement;
@@ -127,6 +131,99 @@ public static class GeminiSession
         return new GeminiSessionHeader(id, Time(root, "startTime"), Time(root, "lastUpdated"),
             Text(root, "summary") is { Length: > 0 } summary ? summary.Trim() : null, first, count);
     }
+
+    /// <summary>The kinds of document this tool writes itself, for what it imports: every header field comes before the messages.</summary>
+    private static readonly HashSet<string> OwnKinds = new(StringComparer.Ordinal) { "google-takeout", "chatgpt-export", "claude-export" };
+
+    private const int QuickBytes = 64 * 1024;
+
+    /// <summary>
+    /// The header of a document this tool wrote itself — an import — from its first kilobytes, up
+    /// to the first thing the user said: a sync lists thousands of them, some megabytes long.
+    /// Null for anything else, a Gemini CLI session or a first question further in than that,
+    /// which is then read whole.
+    /// </summary>
+    private static GeminiSessionHeader? QuickHeader(string path)
+    {
+        var buffer = ArrayPool<byte>.Shared.Rent(QuickBytes);
+        try
+        {
+            int read;
+            using (var stream = TranscriptFiles.OpenRead(path))
+                read = stream.ReadAtLeast(buffer.AsSpan(0, QuickBytes), QuickBytes, throwOnEndOfStream: false);
+            return QuickHeader(buffer.AsSpan(0, read), isFinalBlock: read < QuickBytes);
+        }
+        finally
+        {
+            ArrayPool<byte>.Shared.Return(buffer);
+        }
+    }
+
+    /// <summary>The header from a document's first bytes; null when they do not hold it, or the document is not one of this tool's own.</summary>
+    internal static GeminiSessionHeader? QuickHeader(ReadOnlySpan<byte> bytes, bool isFinalBlock)
+    {
+        try
+        {
+            return QuickHeaderOf(bytes, isFinalBlock);
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return null;            // not as expected — a value cut off by the first bytes' end: read whole
+        }
+    }
+
+    private static GeminiSessionHeader? QuickHeaderOf(ReadOnlySpan<byte> bytes, bool isFinalBlock)
+    {
+        var reader = new Utf8JsonReader(bytes, isFinalBlock, default);
+        if (!reader.Read() || reader.TokenType != JsonTokenType.StartObject) return null;
+        string? id = null, summary = null;
+        DateTimeOffset? started = null, updated = null;
+        var own = false;
+        while (reader.Read() && reader.TokenType == JsonTokenType.PropertyName)
+        {
+            var name = reader.GetString();
+            if (!reader.Read()) return null;
+            var text = reader.TokenType == JsonTokenType.String ? reader.GetString() : null;
+            switch (name)
+            {
+                case "sessionId": id = text; break;
+                case "startTime": started = ParseTime(text); break;
+                case "lastUpdated": updated = ParseTime(text); break;
+                case "summary": summary = text; break;
+                case "kind": own = text is not null && OwnKinds.Contains(text); break;
+                case "messages":
+                    if (!own || string.IsNullOrEmpty(id) || reader.TokenType != JsonTokenType.StartArray) return null;
+                    var count = 0;
+                    while (reader.Read())
+                    {
+                        if (reader.TokenType == JsonTokenType.EndArray)
+                            return count == 0 ? null : Header(id, started, updated, summary, null, count);
+                        if (reader.TokenType != JsonTokenType.StartObject) return null;
+                        using var message = JsonDocument.ParseValue(ref reader);
+                        count++;
+                        if (Text(message.RootElement, "type") == "user" && PartsText(message.RootElement) is var words
+                            && !string.IsNullOrWhiteSpace(words))
+                            return Header(id, started, updated, summary, words, count);
+                    }
+                    return null;        // the first kilobytes ran out before the first question
+                default:
+                    if (!reader.TrySkip()) return null;
+                    break;
+            }
+        }
+        return null;
+    }
+
+    private static GeminiSessionHeader Header(string id, DateTimeOffset? started, DateTimeOffset? updated, string? summary,
+        string? first, int count) =>
+        new(id, started, updated, summary is { Length: > 0 } words ? words.Trim() : null, first, count);
+
+    private static DateTimeOffset? ParseTime(string? iso) =>
+        iso is { Length: > 0 and < 64 }
+        && DateTimeOffset.TryParse(iso, CultureInfo.InvariantCulture,
+            DateTimeStyles.AssumeUniversal | DateTimeStyles.AdjustToUniversal, out var when)
+            ? when
+            : null;
 
     /// <summary>
     /// The session's entries for display, in order: what the two sides said, a tool's call and
@@ -153,7 +250,7 @@ public static class GeminiSession
                     ReadUser(message, index, when, folder, keepImages, ref imageBytes, entries);
                     break;
                 case "gemini":
-                    ReadModel(message, index, when, entries);
+                    ReadModel(message, index, when, folder, keepImages, ref imageBytes, entries);
                     break;
                 case "info" or "warning" or "error":
                     if (PartsText(message) is { Length: > 0 } note)
@@ -230,7 +327,8 @@ public static class GeminiSession
         if (words.Length > 0) AddText(entries, index, when, MessageRole.User, words.ToString());
     }
 
-    private static void ReadModel(JsonElement message, int index, string? when, List<TranscriptEntry> entries)
+    private static void ReadModel(JsonElement message, int index, string? when, string? folder, bool keepImages,
+        ref long imageBytes, List<TranscriptEntry> entries)
     {
         if (message.TryGetProperty("thoughts", out var thoughts) && thoughts.ValueKind == JsonValueKind.Array)
         {
@@ -253,6 +351,14 @@ public static class GeminiSession
         {
             var text = content.ValueKind == JsonValueKind.String ? JsonText.Of(content) ?? "" : PartsText(message);
             AddText(entries, index, when, MessageRole.Assistant, text);
+            // Pictures the model made, kept beside an imported conversation.
+            if (content.ValueKind == JsonValueKind.Array)
+                foreach (var part in content.EnumerateArray())
+                    if (part.ValueKind == JsonValueKind.Object && part.TryGetProperty("launcherFile", out var kept))
+                        entries.Add(KeptFile(kept, folder, index, when, keepImages, ref imageBytes));
+                    else if (part.ValueKind == JsonValueKind.Object && part.TryGetProperty("fileData", out var named))
+                        entries.Add(new TranscriptEntry(index, MessageRole.Attachment,
+                            "（附件 · " + (Text(named, "mimeType") ?? "文件") + " · " + (Text(named, "fileUri") ?? "") + "）", null, when));
         }
 
         if (message.TryGetProperty("toolCalls", out var calls) && calls.ValueKind == JsonValueKind.Array)

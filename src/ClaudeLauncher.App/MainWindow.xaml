@@ -131,9 +131,15 @@
             <Button x:Name="OpenClaudeButton" Style="{StaticResource ClaudeButton}" Padding="16,7"
                     Click="OpenClaude_Click" Content="打开 Claude"
                     ToolTip="启动或切换到官方 Claude 桌面版"/>
-            <Button x:Name="OpenChatGptButton" Grid.Column="1" Margin="8,0,0,0" Style="{StaticResource CodexButton}"
-                    Padding="16,7" Click="OpenChatGpt_Click" Content="打开 ChatGPT"
-                    ToolTip="有「Codex++（全部任务）」快捷方式时走快捷方式，否则启动商店版"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button x:Name="OpenChatGptButton" Margin="8,0,0,0" Style="{StaticResource CodexButton}"
+                        Padding="16,7" Click="OpenChatGpt_Click" Content="打开 ChatGPT"
+                        ToolTip="有「Codex++（全部任务）」快捷方式时走快捷方式，否则启动商店版"/>
+                <Button x:Name="OpenDeepSeekButton" Margin="8,0,0,0" Style="{StaticResource DeepSeekButton}"
+                        Padding="16,7" Click="OpenDeepSeek_Click" Content="打开 DeepSeek" Visibility="Collapsed"
+                        AutomationProperties.Name="打开 DeepSeek Harness"
+                        ToolTip="通过你自己的快捷方式启动 DeepSeek Harness，在浏览器里打开"/>
+            </StackPanel>
 
             <Grid Grid.Column="2" Margin="18,0,8,0">
                 <TextBox x:Name="SearchBox" Padding="30,6,32,6" VerticalContentAlignment="Center"
@@ -195,12 +201,24 @@
                         <MenuItem Header="打开数据目录" Click="OpenDataRoot_Click">
                             <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B7;"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem Header="导入 ChatGPT 网页版（数据导出）…" Click="ImportChatGptWeb_Click"
+                                  ToolTip="把 chatgpt.com 上的对话导进来：先在 ChatGPT 的设置里导出数据，再选中邮件里下载的压缩包&#x0a;窗口里有分步说明">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B5;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="导入 Claude 网页版（数据导出）…" Click="ImportClaudeWeb_Click"
+                                  ToolTip="把 claude.ai 上的对话导进来：先在 Claude 的设置里导出数据，再选中邮件里下载的压缩包&#x0a;窗口里有分步说明">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B5;"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem Header="导入 Gemini 网页版（Google Takeout）…" Click="ImportTakeout_Click"
                                   ToolTip="把 gemini.google.com 上的对话导进来：先在 Google Takeout 导出，再选中下载的压缩包&#x0a;窗口里有分步说明">
                             <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B5;"/></MenuItem.Icon>
                         </MenuItem>
+                        <MenuItem Header="DeepSeek Harness 的会话位置…" Click="DshHomes_Click"
+                                  ToolTip="读 DeepSeek Harness（dsh）保存的会话：DSH_HOME 和 .dsh 自动找；&#x0a;用启动脚本把 DSH_HOME 指到别处的（本地部署的 data 文件夹），在这里添加">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8DA;"/></MenuItem.Icon>
+                        </MenuItem>
                         <MenuItem Header="用量统计…" Click="Usage_Click"
-                                  ToolTip="读本机的对话记录，统计 Claude、Codex 与 Gemini CLI 用了多少 token：按天、模型、工作目录、会话">
+                                  ToolTip="读本机的对话记录，统计 Claude、Codex、Gemini CLI 与 DeepSeek Harness 用了多少 token：按天、模型、工作目录、会话">
                             <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE9D2;"/></MenuItem.Icon>
                         </MenuItem>
                         <Separator/>
@@ -469,7 +487,7 @@
                                             </DataTemplate>
                                         </GridViewColumn.CellTemplate>
                                     </GridViewColumn>
-                                    <GridViewColumn x:Name="SourceColumn" Width="92">
+                                    <GridViewColumn x:Name="SourceColumn" Width="104">
                                         <GridViewColumn.CellTemplate>
                                             <DataTemplate>
                                                 <TextBlock Text="{Binding Backend}" Foreground="{Binding BackendBrush}"

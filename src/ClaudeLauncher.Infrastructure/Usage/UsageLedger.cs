@@ -13,12 +13,21 @@ public readonly record struct TokenCounts(long Calls, long Input, long CacheWrit
     /// <summary>Everything the model read and wrote: fresh input, cache writes, cache reads and output.</summary>
     public long Total => Input + CacheWrite + CacheRead + Output;
 
+    /// <summary>What the calls read in: the conversation so far, each call reading all of it again.</summary>
+    public long Context => Input + CacheWrite + CacheRead;
+
+    /// <summary>The context a call read on average: what makes a long conversation dear and slow; 0 without calls.</summary>
+    public double ContextPerCall => Calls > 0 ? (double)Context / Calls : 0;
+
+    /// <summary>The share of the context read from the cache, at a fraction of the price of fresh input; 0 without context.</summary>
+    public double CacheHit => Context > 0 ? (double)CacheRead / Context : 0;
+
     public static TokenCounts operator +(TokenCounts a, TokenCounts b) => new(
         a.Calls + b.Calls, a.Input + b.Input, a.CacheWrite + b.CacheWrite, a.CacheRead + b.CacheRead, a.Output + b.Output);
 }
 
 /// <summary>One conversation's use of one model on one day (local time).</summary>
-public sealed record UsageRow(string Conversation, UsageApp App, DateOnly Day, string Model, TokenCounts Tokens);
+public sealed record UsageRow(string Conversation, AppFamily App, DateOnly Day, string Model, TokenCounts Tokens);
 
 /// <summary>
 /// How many tokens the conversations on this computer used, read from their transcripts and
@@ -136,7 +145,7 @@ public sealed class UsageLedger : IDisposable
 
     /// <summary>A file that records calls, and the conversation they are counted for.</summary>
     /// <param name="Origin">For a rollout the list does not have: its thread and the one it came from, as read from it.</param>
-    public sealed record Source(string Conversation, string Path, UsageApp App, string? Origin = null);
+    public sealed record Source(string Conversation, string Path, AppFamily App, string? Origin = null);
 
     /// <param name="Read">Files read this time, whole or from where the last pass stopped.</param>
     /// <param name="Calls">Calls counted for the first time.</param>
@@ -159,34 +168,47 @@ public sealed class UsageLedger : IDisposable
             roots = LoadRoots();
         }
 
-        var work = new List<(Source Source, FileInfo Info, Known? Before)>();
+        var work = new List<(Source Source, FileInfo File, (long Length, long Written) Info, Known? Before)>();
         var listed = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Dictionary<string, (string Path, Known File)>? plainByName = null;
         foreach (var source in sources)
         {
             cancellation.ThrowIfCancellationRequested();
             if (!listed.Add(source.Path)) continue;          // one file, one conversation: the first to name it
-            FileInfo info;
+            FileInfo file;
+            (long Length, long Written) info;
             try
             {
-                info = new FileInfo(source.Path);
-                if (!info.Exists) continue;
+                // A packed copy says what it holds unpacked: offsets are the plain transcript's.
+                if (TranscriptFiles.Stat(source.Path) is not { } stat) continue;
+                info = stat;
+                file = new FileInfo(source.Path);
             }
             catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
             {
                 continue;
             }
             known.TryGetValue(source.Path, out var before);
-            if (before is not null && before.Length == info.Length && before.Written == info.LastWriteTimeUtc.Ticks)
+            if (before is not null && before.Length == info.Length && before.Written == info.Written)
             {
                 if (before.Conversation != source.Conversation) lock (_gate) Reassign(before.Id, source.Conversation);
                 continue;
             }
-            work.Add((source, info, before));
+            if (before is null && PackedCopy.HasSuffix(source.Path)
+                && (plainByName ??= PlainByName(known)).TryGetValue(Path.GetFileName(source.Path)[..^PackedCopy.Suffix.Length], out var plain)
+                && plain.File.Conversation == source.Conversation && plain.File.Length == info.Length
+                && PackedCopy.IsPackingOf(source.Path, plain.Path))
+            {
+                // The same transcript, packed since it was counted: only its name changed.
+                lock (_gate) Rename(plain.File.Id, source.Path, info.Written);
+                continue;
+            }
+            work.Add((source, file, info, before));
         }
 
         // Oldest file first: a forked or resumed conversation repeats calls its original has, and
         // they stay counted where they were made.
-        work.Sort((a, b) => CreatedTicks(a.Info).CompareTo(CreatedTicks(b.Info)));
+        work.Sort((a, b) => CreatedTicks(a.File).CompareTo(CreatedTicks(b.File)));
 
         long calls = 0;
         var read = 0;
@@ -194,11 +216,11 @@ public sealed class UsageLedger : IDisposable
         {
             cancellation.ThrowIfCancellationRequested();
             progress?.Report((i, work.Count));
-            var (source, info, before) = work[i];
+            var (source, _, info, before) = work[i];
 
             // Grown in place: read on from where the last pass stopped. Anything else starts over.
-            // A Gemini session is written again whole: it is always counted afresh.
-            var append = source.App != UsageApp.Gemini
+            // A Gemini or dsh session is read whole: it is always counted afresh.
+            var append = !WholeTranscript.Is(source.Path)
                          && before is not null && info.Length >= before.Length && before.NextOffset <= info.Length;
             UsageScan scan;
             try
@@ -217,7 +239,7 @@ public sealed class UsageLedger : IDisposable
                 var id = before?.Id ?? NewFile(tx, source);
                 if (before is not null && !append) Forget(tx, id);
                 calls += Record(tx, id, scan.Calls);
-                SaveFile(tx, id, source, info.Length, info.LastWriteTimeUtc.Ticks, scan.NextOffset, scan.State);
+                SaveFile(tx, id, source, info.Length, info.Written, scan.NextOffset, scan.State);
                 if (scan is { Thread: { } thread, Root: { } root })
                 {
                     roots[thread] = root;
@@ -229,6 +251,23 @@ public sealed class UsageLedger : IDisposable
         }
         progress?.Report((work.Count, work.Count));
         return new UpdateRun(sources.Count, read, calls);
+    }
+
+    /// <summary>Files counted under a plain name, by that name: where one was packed since, it is found under its new name.</summary>
+    private static Dictionary<string, (string Path, Known File)> PlainByName(Dictionary<string, Known> known) =>
+        known.Where(k => !PackedCopy.HasSuffix(k.Key))
+            .GroupBy(k => Path.GetFileName(k.Key), StringComparer.OrdinalIgnoreCase)
+            .Where(g => g.Count() == 1)
+            .ToDictionary(g => g.Key, g => (g.First().Key, g.First().Value), StringComparer.OrdinalIgnoreCase);
+
+    private void Rename(long id, string path, long written)
+    {
+        using var cmd = _connection.CreateCommand();
+        cmd.CommandText = "UPDATE files SET path=$p, written=$w WHERE id=$id;";
+        cmd.Parameters.AddWithValue("$id", id);
+        cmd.Parameters.AddWithValue("$p", path);
+        cmd.Parameters.AddWithValue("$w", written);
+        cmd.ExecuteNonQuery();
     }
 
     private static long CreatedTicks(FileInfo info)
@@ -256,7 +295,7 @@ public sealed class UsageLedger : IDisposable
                 if (!DateOnly.TryParseExact(reader.GetString(2), "yyyy-MM-dd", CultureInfo.InvariantCulture,
                         DateTimeStyles.None, out var day))
                     continue;
-                rows.Add(new UsageRow(reader.GetString(0), (UsageApp)reader.GetInt32(1), day, reader.GetString(3),
+                rows.Add(new UsageRow(reader.GetString(0), (AppFamily)reader.GetInt32(1), day, reader.GetString(3),
                     new TokenCounts(reader.GetInt64(4), reader.GetInt64(5), reader.GetInt64(6), reader.GetInt64(7),
                         reader.GetInt64(8))));
             }
@@ -307,24 +346,18 @@ public sealed class UsageLedger : IDisposable
         var threads = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var (row, path) in TranscriptLocator.FindAll(rows, claudeConfigDir, codex, cancellation))
         {
-            // Takeout records no token counts for Gemini on the web.
-            if (row.Key.Backend == ConversationKey.GeminiWeb) continue;
+            // A source whose records carry no token counts (Gemini on the web, from Takeout) adds nothing.
+            if (Sources.Of(row.Key.Backend) is not { CountsTokens: true } source) continue;
             var conversation = ContentIndex.KeyOf(row.Key);
-            if (row.Key.Backend == ConversationKey.Gemini)
-            {
-                sources.Add(new Source(conversation, path, UsageApp.Gemini));
-                continue;
-            }
-            if (row.Key.Backend == ConversationKey.Codex)
-            {
-                sources.Add(new Source(conversation, path, UsageApp.Codex));
+            sources.Add(new Source(conversation, path, source.Family));
+            if (source.Family == AppFamily.Codex)
                 threads.TryAdd(row.Key.NativeSessionId, conversation);
-                continue;
+            else if (source.Family == AppFamily.Claude)
+            {
+                var subagents = Path.Combine(Path.GetDirectoryName(path) ?? "", Path.GetFileNameWithoutExtension(path), "subagents");
+                foreach (var file in Files(subagents, "*.jsonl", SearchOption.TopDirectoryOnly))
+                    sources.Add(new Source(conversation, file, AppFamily.Claude));
             }
-            sources.Add(new Source(conversation, path, UsageApp.Claude));
-            var subagents = Path.Combine(Path.GetDirectoryName(path) ?? "", Path.GetFileNameWithoutExtension(path), "subagents");
-            foreach (var file in Files(subagents, "*.jsonl", SearchOption.TopDirectoryOnly))
-                sources.Add(new Source(conversation, file, UsageApp.Claude));
         }
 
         var named = sources.Select(s => s.Path).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -340,7 +373,7 @@ public sealed class UsageLedger : IDisposable
                 var owner = origin is not null && threads.TryGetValue(origin, out var parent) ? parent
                     : thread is not null && threads.TryGetValue(thread, out var own) ? own
                     : $"{ConversationKey.Codex}|||{thread ?? Path.GetFileNameWithoutExtension(file)}";
-                sources.Add(new Source(owner, file, UsageApp.Codex, $"{thread}{OriginSeparator}{origin}"));
+                sources.Add(new Source(owner, file, AppFamily.Codex, $"{thread}{OriginSeparator}{origin}"));
             }
         }
         return sources;

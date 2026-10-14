@@ -30,23 +30,25 @@ public enum AppStanding
 public static class OrderingRules
 {
     /// <summary>
-    /// Mirrors what the app itself says about the row. A Codex thread is archived or it is
-    /// in the task list; a terminal transcript has no app-side state at all — unless a desktop
-    /// session was <paramref name="continued"/> from it, which makes it that session's earlier part.
+    /// Mirrors what the app itself says about the row, by its source's rule
+    /// (<see cref="SourceInfo.Standing"/>). A Codex thread is archived or it is in the task list;
+    /// a terminal transcript has no app-side state at all — unless a desktop session was
+    /// <paramref name="continued"/> from it, which makes it that session's earlier part.
     /// </summary>
-    public static AppStanding Standing(string backend, NativeArchiveState state, bool continued = false) => backend switch
-    {
-        ConversationKey.Codex => state == NativeArchiveState.Archived ? AppStanding.Archived : AppStanding.Active,
-        ConversationKey.CliCode => continued ? AppStanding.EarlierPart : AppStanding.TerminalOnly,
-        ConversationKey.GeminiWeb => AppStanding.Imported,
-        _ => state switch
+    public static AppStanding Standing(string backend, NativeArchiveState state, bool continued = false) =>
+        (Sources.Of(backend)?.Standing ?? StandingRule.AppState) switch
         {
-            NativeArchiveState.Active => AppStanding.Active,
-            NativeArchiveState.Archived => AppStanding.Archived,
-            NativeArchiveState.Unsupported => AppStanding.TerminalOnly,
-            _ => AppStanding.Unobserved,
-        },
-    };
+            StandingRule.ArchivedOrListed => state == NativeArchiveState.Archived ? AppStanding.Archived : AppStanding.Active,
+            StandingRule.TerminalTranscript => continued ? AppStanding.EarlierPart : AppStanding.TerminalOnly,
+            StandingRule.Imported => AppStanding.Imported,
+            _ => state switch
+            {
+                NativeArchiveState.Active => AppStanding.Active,
+                NativeArchiveState.Archived => AppStanding.Archived,
+                NativeArchiveState.Unsupported => AppStanding.TerminalOnly,
+                _ => AppStanding.Unobserved,
+            },
+        };
 
     public static string Label(AppStanding standing) => standing switch
     {
@@ -58,14 +60,13 @@ public static class OrderingRules
         _ => "未观测",
     };
 
-    /// <summary>Claude's two views of its history first, desktop before terminal, then ChatGPT, then Gemini CLI and Gemini on the web.</summary>
-    public static int SourceRank(string backend) => backend switch
-    {
-        ConversationKey.DesktopCode => 1,
-        ConversationKey.CliCode => 2,
-        ConversationKey.Codex => 3,
-        ConversationKey.Gemini => 4,
-        ConversationKey.GeminiWeb => 5,
-        _ => 9,
-    };
+    /// <summary>
+    /// Claude's two views of its history first, desktop before terminal, then ChatGPT, then
+    /// Gemini CLI and Gemini on the web, then DeepSeek Harness: each source's own
+    /// <see cref="SourceInfo.Rank"/>; anything unknown last.
+    /// </summary>
+    public static int SourceRank(string backend) => Sources.Of(backend)?.Rank ?? UnknownRank;
+
+    /// <summary>Where a source this program does not know sorts: after all of them.</summary>
+    public const int UnknownRank = 9;
 }

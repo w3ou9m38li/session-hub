@@ -1,3 +1,4 @@
+using ClaudeLauncher.Core.Contracts;
 using ClaudeLauncher.Infrastructure.Catalog;
 
 namespace ClaudeLauncher.App.ViewModels;
@@ -74,7 +75,7 @@ public sealed class TimeOptionViewModel(TimeWindow window, string display, int d
     ];
 }
 
-/// <summary>One entry of the app filter: all conversations, Claude's, or ChatGPT's (Codex).</summary>
+/// <summary>One entry of the app filter: all conversations, or one app family's (Claude's, ChatGPT's…).</summary>
 public sealed class BackendOptionViewModel(BackendFilter filter, string display)
 {
     public BackendFilter Filter { get; } = filter;
@@ -85,8 +86,6 @@ public sealed class BackendOptionViewModel(BackendFilter filter, string display)
     public static IReadOnlyList<BackendOptionViewModel> All { get; } =
     [
         new(BackendFilter.All, "全部应用"),
-        new(BackendFilter.Claude, "Claude"),
-        new(BackendFilter.Codex, "ChatGPT · Codex"),
-        new(BackendFilter.Gemini, "Gemini"),
+        .. Sources.Families.Select(f => new BackendOptionViewModel(new BackendFilter(f.Family), f.FilterName)),
     ];
 }

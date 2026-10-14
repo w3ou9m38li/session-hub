@@ -57,6 +57,20 @@ public sealed class UsageLedgerTests : IDisposable
         return path;
     }
 
+    [Fact]
+    public void TheContextACallReadsIsWhatWentInAveragedOverTheCalls()
+    {
+        // Two calls: fresh input, a cache write and cache reads go in; output does not.
+        var tokens = new TokenCounts(Calls: 2, Input: 1_000, CacheWrite: 4_000, CacheRead: 195_000, Output: 9_999);
+        Assert.Equal(200_000, tokens.Context);
+        Assert.Equal(100_000, tokens.ContextPerCall);
+        Assert.Equal(0.975, tokens.CacheHit, precision: 6);
+
+        Assert.Equal(0, new TokenCounts().ContextPerCall);                  // no calls: nothing to average
+        Assert.Equal(0, new TokenCounts(Calls: 1, 0, 0, 0, Output: 10).CacheHit);
+        Assert.Equal(100_000, (tokens + tokens + tokens).ContextPerCall);  // added up, the average stays
+    }
+
     private TokenCounts Total(string? conversation = null)
     {
         var total = new TokenCounts();
@@ -73,7 +87,7 @@ public sealed class UsageLedgerTests : IDisposable
             Claude("1", "2026-09-01T08:00:01Z", 2, 300, 1000, 50, block: "tool_use"),       // same response, next block
             ToolResult("big output"),
             Claude("2", "2026-09-01T08:01:00Z", 3, 10, 1400, 70));
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
 
         var total = Total();
         Assert.Equal(2, total.Calls);
@@ -100,7 +114,7 @@ public sealed class UsageLedgerTests : IDisposable
             Claude("3", "2026-09-01T08:40:00Z", 1, 0, 300, 30));
 
         // Listed newest first: the ledger still reads the older file first.
-        _ledger.Update([new("resumed", resumed, UsageApp.Claude), new("original", original, UsageApp.Claude)]);
+        _ledger.Update([new("resumed", resumed, AppFamily.Claude), new("original", original, AppFamily.Claude)]);
 
         Assert.Equal(2, Total("original").Calls);
         Assert.Equal(1, Total("resumed").Calls);
@@ -121,7 +135,7 @@ public sealed class UsageLedgerTests : IDisposable
             + "\"last_token_usage\":{\"input_tokens\":0,\"cached_input_tokens\":0,\"output_tokens\":0,\"total_tokens\":37417}}}}",
             Turn("gpt-6-astra"),
             Count("2026-09-01T08:02:00Z", (500, 400, 5), (500, 400, 5)));       // the running totals started over
-        _ledger.Update([new("x", path, UsageApp.Codex)]);
+        _ledger.Update([new("x", path, AppFamily.Codex)]);
 
         var total = Total();
         Assert.Equal(3, total.Calls);
@@ -141,7 +155,7 @@ public sealed class UsageLedgerTests : IDisposable
             "{\"timestamp\":\"2026-09-01T08:00:30Z\",\"type\":\"event_msg\",\"payload\":{\"type\":\"user_message\",\"message\":\""
             + new string('m', 100_000) + "\"}}",
             Count("2026-09-01T08:01:00Z", (1000, 0, 50), (1000, 0, 50)));
-        _ledger.Update([new("x", path, UsageApp.Codex)]);
+        _ledger.Update([new("x", path, AppFamily.Codex)]);
 
         var row = Assert.Single(_ledger.Rows());
         Assert.Equal("gpt-5.6-sol", row.Model);
@@ -172,8 +186,8 @@ public sealed class UsageLedgerTests : IDisposable
             Count("2026-09-01T10:00:00Z", (700, 400, 60), (400, 300, 30)),
             Count("2026-09-01T10:02:00Z", (900, 600, 65), (200, 200, 5)));
 
-        _ledger.Update([new("again", again, UsageApp.Codex), new("fork", fork, UsageApp.Codex),
-            new("parent", parent, UsageApp.Codex)]);
+        _ledger.Update([new("again", again, AppFamily.Codex), new("fork", fork, AppFamily.Codex),
+            new("parent", parent, AppFamily.Codex)]);
 
         Assert.Equal(2, Total("parent").Calls);
         Assert.Equal(1, Total("fork").Calls);
@@ -191,7 +205,7 @@ public sealed class UsageLedgerTests : IDisposable
         var two = Write("rollout-two.jsonl", 5, Meta("two"), Turn("gpt-5.5"),
             Count("2026-09-01T08:05:00Z", (500, 0, 20), (500, 0, 20)));
 
-        _ledger.Update([new("one", one, UsageApp.Codex), new("two", two, UsageApp.Codex)]);
+        _ledger.Update([new("one", one, AppFamily.Codex), new("two", two, AppFamily.Codex)]);
 
         Assert.Equal(1, Total("one").Calls);
         Assert.Equal(1, Total("two").Calls);
@@ -204,14 +218,14 @@ public sealed class UsageLedgerTests : IDisposable
         var path = Write("partial.jsonl", 0,
             Claude("1", "2026-09-01T08:00:00Z", 2, 100, 1000, 3, block: "thinking"),
             Claude("1", "2026-09-01T08:00:01Z", 2, 100, 1000, 161, block: "text"));
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
         Assert.Equal(1, Total().Calls);
         Assert.Equal(161, Total().Output);
 
         // The rest of a response arriving in a later read: what it adds, and only that.
         File.AppendAllText(path, Claude("1", "2026-09-01T08:00:02Z", 2, 100, 1000, 200, block: "tool_use") + "\n"
             + Claude("1", "2026-09-01T08:00:03Z", 2, 100, 1000, 50) + "\n", new UTF8Encoding(false));
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
         Assert.Equal(1, Total().Calls);
         Assert.Equal(200, Total().Output);
         Assert.Equal(1000, Total().CacheRead);
@@ -228,7 +242,7 @@ public sealed class UsageLedgerTests : IDisposable
             "\"text\":\"" + new string('y', 1200 * 1024) + "\"", StringComparison.Ordinal);
         var path = Write("long.jsonl", 0, filler, big);
 
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
 
         Assert.Equal(1, Total().Calls);
         Assert.Equal(7, Total().Output);
@@ -238,23 +252,23 @@ public sealed class UsageLedgerTests : IDisposable
     public void AGrowingFileIsReadOnFromWhereItStopped()
     {
         var path = Write("growing.jsonl", 0, Claude("1", "2026-09-01T08:00:00Z", 1, 0, 10, 1));
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
         Assert.Equal(1, Total().Calls);
 
         // One more line, and one still being written: the half line waits for the next read.
         var line3 = Claude("3", "2026-09-01T08:02:00Z", 1, 0, 30, 3);
         File.AppendAllText(path, Claude("2", "2026-09-01T08:01:00Z", 1, 0, 20, 2) + "\n" + line3[..40],
             new UTF8Encoding(false));
-        var run = _ledger.Update([new("a", path, UsageApp.Claude)]);
+        var run = _ledger.Update([new("a", path, AppFamily.Claude)]);
         Assert.Equal(1, run.Read);
         Assert.Equal(2, Total().Calls);
 
         File.AppendAllText(path, line3[40..] + "\n", new UTF8Encoding(false));
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
         Assert.Equal(3, Total().Calls);
         Assert.Equal(6, Total().Output);
 
-        Assert.Equal(0, _ledger.Update([new("a", path, UsageApp.Claude)]).Read);     // unchanged: not read at all
+        Assert.Equal(0, _ledger.Update([new("a", path, AppFamily.Claude)]).Read);     // unchanged: not read at all
     }
 
     [Fact]
@@ -264,11 +278,11 @@ public sealed class UsageLedgerTests : IDisposable
             Claude("1", "2026-09-01T08:00:00Z", 1, 0, 10, 1),
             Claude("2", "2026-09-01T08:01:00Z", 1, 0, 20, 2),
             Claude("3", "2026-09-01T08:02:00Z", 1, 0, 30, 3));
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
         Assert.Equal(3, Total().Calls);
 
         File.WriteAllText(path, Claude("9", "2026-09-01T09:00:00Z", 1, 0, 90, 9) + "\n", new UTF8Encoding(false));
-        _ledger.Update([new("a", path, UsageApp.Claude)]);
+        _ledger.Update([new("a", path, AppFamily.Claude)]);
 
         Assert.Equal(1, Total().Calls);
         Assert.Equal(9, Total().Output);

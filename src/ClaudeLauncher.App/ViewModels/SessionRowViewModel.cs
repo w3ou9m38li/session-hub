@@ -16,6 +16,9 @@ public sealed class SessionRowViewModel(SessionMetadata metadata) : INotifyPrope
 {
     public SessionMetadata Metadata { get; } = metadata;
 
+    /// <summary>What this row's source is: its names, its app family, and what can be done with it.</summary>
+    public SourceInfo Source { get; } = Sources.Describe(metadata.Key.Backend);
+
     /// <summary>
     /// The heading this row is listed under when the list is sorted by a category, or null.
     /// Set by the list when it builds the row; rows of one category carry equal values, which
@@ -47,9 +50,6 @@ public sealed class SessionRowViewModel(SessionMetadata metadata) : INotifyPrope
 
     public bool IsCodex => Metadata.Key.Backend == ConversationKey.Codex;
 
-    /// <summary>A Gemini CLI session: a terminal tool, with no app to open it in.</summary>
-    public bool IsGemini => Metadata.Key.Backend == ConversationKey.Gemini;
-
     /// <summary>The app no longer has this conversation's record; this tool keeps the row (and its copy, when one was made).</summary>
     public bool IsSourceGone => Metadata.SourceGoneUtc is not null;
 
@@ -58,8 +58,11 @@ public sealed class SessionRowViewModel(SessionMetadata metadata) : INotifyPrope
           + "会话管家一直保留这一行；做过副本的话照常能看、能搜。只有你在会话管家里删除它才会删掉。"
         : "";
 
-    /// <summary>A conversation from Gemini on the web, imported from Google Takeout: a copy, with no CLI to continue it in.</summary>
-    public bool IsGeminiWeb => Metadata.Key.Backend == ConversationKey.GeminiWeb;
+    /// <summary>
+    /// Whether the app of a source opened by <see cref="OpenRoute.AppOnly"/> has an entry point to
+    /// start it by — DeepSeek Harness's shortcut, say. Set by the window once it has looked.
+    /// </summary>
+    public static Func<SourceInfo, bool> CanStartApp { get; set; } = _ => false;
 
     /// <summary>Archived in its own app (not in this tool's archive).</summary>
     public bool IsArchivedInApp => Metadata.NativeArchiveState == NativeArchiveState.Archived;
@@ -111,12 +114,12 @@ public sealed class SessionRowViewModel(SessionMetadata metadata) : INotifyPrope
     /// <summary>Screen readers and the list's own text search read this.</summary>
     public override string ToString() => Title;
 
-    /// <summary>For the narrow source column: Gemini CLI is one source, so its short name says enough.</summary>
-    public string Backend => IsGemini ? "Gemini" : IsGeminiWeb ? "Gemini 网页" : BackendNames.Display(Metadata.Key.Backend);
+    /// <summary>For the narrow source column: 「终端 CLI」「Gemini 网页」.</summary>
+    public string Backend => Source.ColumnName;
 
-    /// <summary>Which app the row belongs to, at a glance: Claude's orange, ChatGPT's green, Gemini's blue.</summary>
-    public Brush BackendBrush => IsCodex ? Palette.CodexText : IsGemini || IsGeminiWeb ? Palette.GeminiText : Palette.ClaudeText;
-    public Brush BackendFill => IsCodex ? Palette.CodexFill : IsGemini || IsGeminiWeb ? Palette.GeminiFill : Palette.ClaudeFill;
+    /// <summary>Which app the row belongs to, at a glance: Claude's orange, ChatGPT's green, Gemini's blue, DeepSeek Harness's violet.</summary>
+    public Brush BackendBrush => Palette.TextOf(Source.Family);
+    public Brush BackendFill => Palette.FillOf(Source.Family);
 
     public string? ProjectRef => Metadata.ProjectRef;
     public string Project => Metadata.ProjectRef ?? "—";
@@ -195,24 +198,10 @@ public sealed class SessionRowViewModel(SessionMetadata metadata) : INotifyPrope
     public AppStanding Standing =>
         OrderingRules.Standing(Metadata.Key.Backend, Metadata.NativeArchiveState, Metadata.ContinuedIn is not null);
 
-    public string AppStateLong => Metadata.Key.Backend switch
-    {
-        ConversationKey.Codex => Metadata.NativeArchiveState == NativeArchiveState.Archived
-            ? "在 ChatGPT 中已归档" : "在 ChatGPT 的任务列表中",
-        ConversationKey.CliCode when IsEarlierPart =>
-            "桌面会话续接前的部分：Claude 续接这段对话时换了一份新的记录，这一份是之前的内容；在 Claude 侧边栏里是那条桌面会话",
-        ConversationKey.CliCode => "只在终端 transcript 里，不在 Claude 桌面侧边栏",
-        ConversationKey.Gemini => "Gemini CLI 的终端会话：没有应用内的列表或归档",
-        ConversationKey.GeminiWeb => "从 Google Takeout 导入的副本：网页版里后来的改动不会自动反映到这里，再导入一份新的导出才会补上",
-        _ => Metadata.NativeArchiveState switch
-        {
-            NativeArchiveState.Archived => "在 Claude 桌面中已归档",
-            NativeArchiveState.Active => "在 Claude 桌面侧边栏中",
-            _ => "未观测到在 Claude 中的状态",
-        },
-    };
+    /// <summary>The standing in words, as the source puts it; the one-word label where it has no words for it.</summary>
+    public string AppStateLong => Source.StateTexts.TryGetValue(Standing, out var words) ? words : OrderingRules.Label(Standing);
 
-    public string AppStateTooltip => (IsGeminiWeb ? AppStateLong : AppStateLong + "（读自应用自己的文件，本工具不改动它）")
+    public string AppStateTooltip => (Standing == AppStanding.Imported ? AppStateLong : AppStateLong + "（读自应用自己的文件，本工具不改动它）")
                                      + (IsSourceGone ? "\n" + GoneTooltip : "");
 
     public bool HasCoverageWarning => Metadata.SourceCoverage != SourceCoverage.Resolved;
@@ -260,65 +249,93 @@ public sealed class SessionRowViewModel(SessionMetadata metadata) : INotifyPrope
     public string CliSessionId => Metadata.CliSessionId ?? Metadata.Key.NativeSessionId;
 
     /// <summary>The app that owns this conversation, for labels.</summary>
-    public string AppName => IsCodex ? "ChatGPT" : IsGemini ? "Gemini CLI" : IsGeminiWeb ? "Gemini 网页版" : "Claude";
+    public string AppName => Source.AppName;
 
     /// <summary>Who answered, for the transcript view.</summary>
-    public string AssistantName => IsCodex ? "Codex" : IsGemini || IsGeminiWeb ? "Gemini" : "Claude";
+    public string AssistantName => Source.AssistantName;
 
     // --------------------------------------------------------------- actions
 
-    /// <summary>Both apps have a link of their own that opens one conversation.</summary>
-    public bool CanOpenInApp => IsClaude || (IsCodex && ChatGptDeepLink.CanOpen(Metadata.Key.NativeSessionId))
-                                || (IsGeminiWeb && GeminiWebLink.CanOpen(Metadata.Key.NativeSessionId));
+    /// <summary>Claude and ChatGPT have links of their own that open one conversation; others a page, or only the app.</summary>
+    public bool CanOpenInApp => Source.Open switch
+    {
+        OpenRoute.ClaudeLink => IsClaude,
+        OpenRoute.CodexLink => ChatGptDeepLink.CanOpen(Metadata.Key.NativeSessionId),
+        OpenRoute.WebLink => WebLinks.CanOpen(Metadata.Key.Backend, Metadata.Key.NativeSessionId),
+        OpenRoute.AppOnly => CanStartApp(Source),
+        _ => false,
+    };
 
-    public string OpenInAppLabel => IsCodex ? "在 ChatGPT 中打开此任务" : IsGemini ? "没有可打开它的桌面应用"
-        : IsGeminiWeb ? (CanOpenInApp ? "在浏览器中打开这段对话" : "没有这段对话的网页链接") : "在 Claude 中打开此会话";
+    public string OpenInAppLabel => Source.Open switch
+    {
+        OpenRoute.ClaudeLink => "在 Claude 中打开此会话",
+        OpenRoute.CodexLink => "在 ChatGPT 中打开此任务",
+        _ => Source.OpenWords is { } words ? (CanOpenInApp ? words.Label : words.NoLabel) : "没有可打开它的应用",
+    };
 
     /// <summary>For a half-width button; the full wording is in its tooltip.</summary>
-    public string OpenInAppShortLabel => IsCodex ? "在 ChatGPT 中打开" : IsGemini ? "没有桌面应用"
-        : IsGeminiWeb ? (CanOpenInApp ? "在浏览器中打开" : "没有网页链接") : "在 Claude 中打开";
+    public string OpenInAppShortLabel => Source.Open switch
+    {
+        OpenRoute.ClaudeLink => "在 Claude 中打开",
+        OpenRoute.CodexLink => "在 ChatGPT 中打开",
+        _ => Source.OpenWords is { } words ? (CanOpenInApp ? words.ShortLabel : words.NoShortLabel) : "没有应用",
+    };
 
-    public string OpenInAppTooltip => IsGeminiWeb
-        ? CanOpenInApp
-            ? "在默认浏览器里打开 gemini.google.com 上的这段对话（要登录导出时的那个 Google 账号；网页版里删掉了就打不开）"
-            : "导出里没有这段对话的链接：它是按时间相近拼起来的，网页版里没有对应的一段"
-        : IsGemini
-        ? "Gemini CLI 只在终端里用，没有桌面应用能打开这条会话：用 gemini --resume 在终端里接着聊"
-        : IsCodex
-            ? "通过 ChatGPT 自己的 codex:// 链接打开这条任务：交给正在运行的 ChatGPT（Codex++ 的那份也行）；"
-              + "没在运行时先按平时的方式启动它（有「Codex++（全部任务）」快捷方式就走快捷方式）"
-              + (IsArchivedInApp ? "\n这条任务在 ChatGPT 里已归档：ChatGPT 会先问是否「取消归档并打开」，由你在那边决定" : "")
-        : IsEarlierPart
+    public string OpenInAppTooltip => Source.Open switch
+    {
+        OpenRoute.CodexLink =>
+            "通过 ChatGPT 自己的 codex:// 链接打开这条任务：交给正在运行的 ChatGPT（Codex++ 的那份也行）；"
+            + "没在运行时先按平时的方式启动它（有「Codex++（全部任务）」快捷方式就走快捷方式）"
+            + (IsArchivedInApp ? "\n这条任务在 ChatGPT 里已归档：ChatGPT 会先问是否「取消归档并打开」，由你在那边决定" : ""),
+        OpenRoute.ClaudeLink => IsEarlierPart
             ? "这份记录是一条桌面会话续接前的部分：通过官方 claude:// 链接打开它所属的那条桌面会话，不会再导入一份"
-        : Metadata.Key.Backend == ConversationKey.CliCode
-            ? "通过官方 claude://resume 链接请求 Claude 导入这条终端会话并打开：Claude 侧边栏会多出这条会话（已导入过的直接打开）"
-            : "通过官方 claude:// 链接请求 Claude 打开这条会话";
+            : Metadata.Key.Backend == ConversationKey.CliCode
+                ? "通过官方 claude://resume 链接请求 Claude 导入这条终端会话并打开：Claude 侧边栏会多出这条会话（已导入过的直接打开）"
+                : "通过官方 claude:// 链接请求 Claude 打开这条会话",
+        _ => Source.OpenWords is { } words ? (CanOpenInApp ? words.Tooltip : words.NoTooltip) : $"{AppName} 没有可以打开这条会话的应用",
+    };
 
     /// <summary>
-    /// Anything with a session id its CLI accepts can be continued: a Claude transcript (or
-    /// a desktop record pointing at one) with <c>claude --resume</c>, a Codex thread with
-    /// <c>codex resume</c>.
+    /// Anything with a session id its CLI accepts can be continued: a Claude transcript (or a
+    /// desktop record pointing at one) with <c>claude --resume</c>, a Codex thread with
+    /// <c>codex resume</c>, a Gemini CLI session with <c>gemini --resume</c>.
     /// </summary>
-    public bool CanResume => IsCodex ? CodexSessionLauncher.IsValidThreadId(Metadata.Key.NativeSessionId)
-        : IsGemini ? GeminiSessionLauncher.IsValidSessionId(Metadata.Key.NativeSessionId)
-        : IsClaude && Metadata.CliSessionId is { Length: > 0 };
+    public bool CanResume => Source.Resume switch
+    {
+        ResumeRoute.CodexCli => CodexSessionLauncher.IsValidThreadId(Metadata.Key.NativeSessionId),
+        ResumeRoute.GeminiCli => GeminiSessionLauncher.IsValidSessionId(Metadata.Key.NativeSessionId),
+        ResumeRoute.ClaudeCli => IsClaude && Metadata.CliSessionId is { Length: > 0 },
+        _ => false,
+    };
 
-    private string ResumeCommand => IsCodex ? "codex resume" : IsGemini ? "gemini --resume" : "claude --resume";
+    private string ResumeCommand => Source.Resume switch
+    {
+        ResumeRoute.CodexCli => "codex resume",
+        ResumeRoute.GeminiCli => "gemini --resume",
+        _ => "claude --resume",
+    };
 
-    public string ResumeLabel => IsGeminiWeb ? "网页版没有命令行可以接着聊" : $"用 {ResumeCommand} 继续";
+    public string ResumeLabel => Source.Resume == ResumeRoute.None
+        ? Source.NoResumeLabel ?? "没有命令行可以接着聊"
+        : $"用 {ResumeCommand} 继续";
 
-    public string ResumeShortLabel => IsGeminiWeb ? "没有命令行" : IsCodex ? "codex resume 继续" : ResumeCommand;
+    public string ResumeShortLabel => Source.Resume switch
+    {
+        ResumeRoute.None => "没有命令行",
+        ResumeRoute.CodexCli => "codex resume 继续",
+        _ => ResumeCommand,
+    };
 
     public string ResumeTooltip => CanResume
         ? $"在原工作目录打开一个终端窗口，用 {ResumeCommand} 接着这条会话继续"
           + (IsEarlierPart ? "\n注意：这是续接前的记录，从这里继续会接着较早的内容聊，接不上桌面会话后来的对话" : "")
-        : IsCodex
-            ? "这条 Codex 任务的 ID 不是可恢复的格式"
-        : IsGemini
-            ? "这条 Gemini 会话的 ID 不是可恢复的格式"
-        : IsGeminiWeb
-            ? "网页版的对话没有命令行可以接着聊：在浏览器里打开它，在网页上继续"
-            : "这条会话没有关联的 CLI 会话 ID，无法用 --resume 继续";
+        : Source.Resume switch
+        {
+            ResumeRoute.CodexCli => "这条 Codex 任务的 ID 不是可恢复的格式",
+            ResumeRoute.GeminiCli => "这条 Gemini 会话的 ID 不是可恢复的格式",
+            ResumeRoute.ClaudeCli => "这条会话没有关联的 CLI 会话 ID，无法用 --resume 继续",
+            _ => Source.NoResumeTooltip ?? "这个来源没有可以接着聊的命令行",
+        };
 
     public event PropertyChangedEventHandler? PropertyChanged;
 }

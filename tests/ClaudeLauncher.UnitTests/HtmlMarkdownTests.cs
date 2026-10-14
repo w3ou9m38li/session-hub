@@ -1,3 +1,4 @@
+using ClaudeLauncher.Core.Contracts;
 using ClaudeLauncher.Infrastructure.Backends;
 using ClaudeLauncher.Infrastructure.Launch;
 
@@ -69,5 +70,5 @@ public sealed class HtmlMarkdownTests
     [InlineData("1234567", null)]
     [InlineData(null, null)]
     public void OnlyAConversationIdFromALinkGoesIntoOne(string? id, string? link) =>
-        Assert.Equal(link, GeminiWebLink.Build(id));
+        Assert.Equal(link, WebLinks.Build(ConversationKey.GeminiWeb, id));
 }

@@ -364,7 +364,9 @@ public partial class App : Application
         // Export what the apps' files say right now, not what a stale catalog remembers.
         var apps = WindowsAppDiscovery.Discover();
         new CatalogSyncService(catalog, LauncherPaths.ClaudeConfigDir, GeminiPaths.Discover(),
-            new GeminiTakeoutStore(LauncherPaths.GeminiTakeoutStore), LauncherPaths.ProbeCacheFile).Sync(apps.Claude, CodexPaths.Discover());
+            new GeminiTakeoutStore(LauncherPaths.GeminiTakeoutStore), LauncherPaths.ProbeCacheFile,
+            () => DshPaths.Discover(AppSettings.Current.DshHomes), WebExportStore.InDataRoot())
+            .Sync(apps.Claude, CodexPaths.Discover());
 
         var rows = ReadAllRows(catalog);
         var result = SessionExporter.Write(

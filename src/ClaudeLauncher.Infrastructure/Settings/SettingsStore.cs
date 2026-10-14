@@ -28,7 +28,7 @@ public sealed record LauncherSettings
     /// <summary>List column widths the user dragged, by column key.</summary>
     public Dictionary<string, double> ColumnWidths { get; init; } = [];
 
-    /// <summary>"All", "Claude", "Codex" or "Gemini". Anything else reads as "All".</summary>
+    /// <summary>"All", "Claude", "Codex", "Gemini" or "DeepSeek". Anything else reads as "All".</summary>
     public string? AppFilter { get; init; }
 
     /// <summary>The column the list is sorted by (a <c>SortField</c> name); anything unknown reads as newest first.</summary>
@@ -81,8 +81,18 @@ public sealed record LauncherSettings
     /// <summary>Usage window: how many days back it adds up (1, 7, 30, 90; 0 for all).</summary>
     public int UsageDays { get; init; } = 30;
 
-    /// <summary>Usage window: "Claude", "Codex" or "Gemini" to count one app only; null counts them all.</summary>
+    /// <summary>Usage window: "Claude", "Codex", "Gemini" or "DeepSeek" to count one app only; null counts them all.</summary>
     public string? UsageApp { get; init; }
+
+    /// <summary>Usage window: "PerCall" ranks by the context a call reads on average; null by tokens in all.</summary>
+    public string? UsageRank { get; init; }
+
+    /// <summary>
+    /// Folders the user added where DeepSeek Harness keeps its sessions — a <c>DSH_HOME</c>, or a
+    /// deployment folder with one in its <c>data</c> folder — for a deployment that sets
+    /// <c>DSH_HOME</c> only in its own start script. Kept as given.
+    /// </summary>
+    public List<string> DshHomes { get; init; } = [];
 
     /// <summary>Where the usage window was left; null opens it over the list.</summary>
     public WindowPlacement? UsageWindow { get; init; }
@@ -157,7 +167,14 @@ public static class SettingsStore
         TranscriptWindow = s.TranscriptWindow is { IsPlausible: true } transcript ? transcript : null,
         UsageWindow = s.UsageWindow is { IsPlausible: true } usage ? usage : null,
         UsageDays = s.UsageDays is 1 or 7 or 30 or 90 or 0 ? s.UsageDays : 30,
-        UsageApp = s.UsageApp is "Claude" or "Codex" or "Gemini" ? s.UsageApp : null,
+        UsageApp = s.UsageApp is "Claude" or "Codex" or "Gemini" or "DeepSeek" ? s.UsageApp : null,
+        UsageRank = s.UsageRank is "PerCall" ? s.UsageRank : null,
+        DshHomes = (s.DshHomes ?? [])
+            .Where(f => !string.IsNullOrWhiteSpace(f) && f.Length < 1024)
+            .Select(f => f.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Take(16)
+            .ToList(),
         TranscriptZoom = double.IsFinite(s.TranscriptZoom) ? Math.Clamp(s.TranscriptZoom, 0.7, 2) : 1,
         // Enum.TryParse also accepts any number, so "7" would name a column that does not exist.
         SortField = Enum.TryParse<Catalog.SortField>(s.SortField, out var field) && Enum.IsDefined(field)

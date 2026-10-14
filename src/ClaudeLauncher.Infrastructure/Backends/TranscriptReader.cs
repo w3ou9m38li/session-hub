@@ -91,7 +91,7 @@ public sealed class TranscriptReader : IDisposable
 
     // Open position after line _linesRead. Null until the first read, after a read that had
     // to stop short of an unfinished last line, and after disposal.
-    private FileStream? _stream;
+    private Stream? _stream;
     private StreamReader? _text;
     private int _linesRead;
     private bool _disposed;
@@ -111,7 +111,7 @@ public sealed class TranscriptReader : IDisposable
 
     public string FilePath => _path;
     public bool Exists => File.Exists(_path);
-    public long SizeBytes => Exists ? new FileInfo(_path).Length : 0;
+    public long SizeBytes => TranscriptFiles.Stat(_path)?.Length ?? 0;
 
     /// <summary>Tail windows tried in turn; most conversations end with dialogue inside the first.</summary>
     private static readonly int[] TailWindows = [128 * 1024, 1024 * 1024, 8 * 1024 * 1024];
@@ -170,14 +170,13 @@ public sealed class TranscriptReader : IDisposable
     internal static (IReadOnlyList<TranscriptEntry> Entries, long NextOffset) ReadDialogueFrom(
         string path, long offset, PooledBytes line, CancellationToken cancellation, OwnPart part)
     {
-        // A Gemini session is one document written again whole: there is no offset to read on from.
-        if (GeminiSession.IsSessionFile(path))
-            return (GeminiSession.ReadDialogue(path, cancellation), new FileInfo(path).Length);
+        // A Gemini or dsh session is read whole: there is no offset to read on from.
+        if (WholeTranscript.Is(path))
+            return (WholeTranscript.ReadDialogue(path, cancellation), TranscriptFiles.Stat(path)?.Length ?? 0);
 
         line.ResetWrittenCount();
         var own = part.Filter(path, offset < 0 ? 0 : offset);
-        using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan);
+        using var stream = TranscriptFiles.OpenSeekable(path, 1, FileOptions.SequentialScan);
         if (offset < 0 || offset > stream.Length) offset = 0;
         stream.Position = offset;
 
@@ -314,15 +313,14 @@ public sealed class TranscriptReader : IDisposable
     public static TranscriptTail ReadTail(
         string path, int count, bool keepImages = false, CancellationToken cancellation = default)
     {
-        if (GeminiSession.IsSessionFile(path))
+        if (WholeTranscript.Is(path))
         {
-            var all = GeminiSession.ReadEntries(path, keepImages, cancellation);
+            var all = WholeTranscript.ReadEntries(path, keepImages, cancellation);
             return new TranscriptTail(all.Count <= count ? all : all.GetRange(all.Count - count, count), true,
                 all.Count(e => e.Role == MessageRole.ToolResult));
         }
 
-        using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.RandomAccess);
+        using var stream = TranscriptFiles.OpenSeekable(path, 1, FileOptions.RandomAccess);
         var length = stream.Length;
         var entries = new List<TranscriptEntry>();
         var folded = 0;
@@ -378,10 +376,9 @@ public sealed class TranscriptReader : IDisposable
     private static List<TranscriptEntry> TailDialogue(
         string path, Predicate<List<TranscriptEntry>> enough, CancellationToken cancellation)
     {
-        if (GeminiSession.IsSessionFile(path)) return GeminiSession.ReadDialogue(path, cancellation);
+        if (WholeTranscript.Is(path)) return WholeTranscript.ReadDialogue(path, cancellation);
 
-        using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.RandomAccess);
+        using var stream = TranscriptFiles.OpenSeekable(path, 1, FileOptions.RandomAccess);
         var length = stream.Length;
         var dialogue = new List<TranscriptEntry>();
 
@@ -429,7 +426,7 @@ public sealed class TranscriptReader : IDisposable
         CancellationToken cancellation = default)
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
-        if (GeminiSession.IsSessionFile(_path)) return ReadDocument(fromLineOffset, maxEntries, cancellation);
+        if (WholeTranscript.Is(_path)) return ReadDocument(fromLineOffset, maxEntries, cancellation);
 
         var entries = new List<TranscriptEntry>(Math.Min(Math.Max(maxEntries, 1), 1024));
         long bytes = 0;
@@ -486,35 +483,32 @@ public sealed class TranscriptReader : IDisposable
             _stream?.Position ?? SizeBytes);
     }
 
-    // A Gemini session, read whole once and paged through by entry; read again from the top
-    // when the file changed since.
+    // A Gemini or dsh session, read whole once and paged through by entry; read again from the
+    // top when the file changed since.
     private List<TranscriptEntry>? _document;
     private (long Length, long Written) _documentStamp;
 
     private TranscriptPage ReadDocument(int from, int maxEntries, CancellationToken cancellation)
     {
         if (!Exists) return new TranscriptPage([], from, true, 0, 0);
-        var info = new FileInfo(_path);
-        var stamp = (info.Length, info.LastWriteTimeUtc.Ticks);
+        var stamp = TranscriptFiles.Stat(_path) ?? (0, 0);
         if (_document is null || (from == 0 && _documentStamp != stamp))
         {
-            _document = GeminiSession.ReadEntries(_path, _keepImages, cancellation);
+            _document = WholeTranscript.ReadEntries(_path, _keepImages, cancellation);
             _documentStamp = stamp;
         }
         var start = Math.Clamp(from, 0, _document.Count);
         var page = _document.GetRange(start, Math.Min(Math.Max(maxEntries, 1), _document.Count - start));
         var next = start + page.Count;
         var end = next >= _document.Count;
-        return new TranscriptPage(page, next, end, info.Length, _document.Count(e => e.Role == MessageRole.ToolResult),
-            end ? info.Length : info.Length * next / Math.Max(1, _document.Count));
+        return new TranscriptPage(page, next, end, stamp.Length, _document.Count(e => e.Role == MessageRole.ToolResult),
+            end ? stamp.Length : stamp.Length * next / Math.Max(1, _document.Count));
     }
 
     private void Reopen()
     {
         Close();
-        _stream = new FileStream(
-            _path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete,
-            128 * 1024, FileOptions.SequentialScan);
+        _stream = TranscriptFiles.OpenSeekable(_path, 128 * 1024, FileOptions.SequentialScan);
         _text = new StreamReader(_stream, Encoding.UTF8, true, 128 * 1024);
         _linesRead = 0;
     }

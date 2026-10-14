@@ -11,18 +11,7 @@ public static class BackendNames
         var space = backend.IndexOf(' ');
         var core = space < 0 ? backend : backend[..space];
         var qualifier = space < 0 ? string.Empty : backend[space..];
-        var name = core switch
-        {
-            ConversationKey.DesktopCode => "桌面 Code",
-            ConversationKey.CliCode => "终端 CLI",
-            ConversationKey.Chat => "普通聊天",
-            ConversationKey.Cowork => "Cowork",
-            ConversationKey.Codex => "Codex",
-            ConversationKey.Gemini => "Gemini CLI",
-            ConversationKey.GeminiWeb => "Gemini 网页版",
-            _ => core,
-        };
-        return name + qualifier;
+        return (Sources.Of(core)?.ReportName ?? core) + qualifier;
     }
 }
 

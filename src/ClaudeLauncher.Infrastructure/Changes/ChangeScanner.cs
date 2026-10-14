@@ -63,8 +63,7 @@ public static class ChangeScanner
         OwnPart part = default)
     {
         var own = part.Filter(path, 0);
-        using var stream = new FileStream(
-            path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete, 1, FileOptions.SequentialScan);
+        using var stream = TranscriptFiles.OpenSeekable(path, 1, FileOptions.SequentialScan);
         var reader = codex ? (LineReader)new CodexReader() : new ClaudeReader();
         using var line = new PooledBytes();
         var skipping = false;
@@ -163,7 +162,7 @@ public static class ChangeScanner
     {
         try
         {
-            using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
+            using var stream = TranscriptFiles.OpenRead(path);
             var buffer = new byte[64 * 1024];
             var length = 0;
             int end;

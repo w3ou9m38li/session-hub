@@ -47,17 +47,30 @@ public sealed class CatalogSyncService
     /// <summary>The conversations imported from Gemini on the web, read only when given.</summary>
     private readonly GeminiTakeoutStore? _geminiWeb;
 
+    /// <summary>The conversations imported from ChatGPT's and Claude's data exports, read only when given.</summary>
+    private readonly IReadOnlyList<WebExportStore> _webExports;
+
+    /// <summary>
+    /// DeepSeek Harness's homes, asked for again at every sync — the user can add or remove one
+    /// while the list is open. Read only when given.
+    /// </summary>
+    private readonly Func<DshPaths>? _dsh;
+    private readonly DshProbeCache _dshProbes = new();
+
     /// <param name="probeCacheFile">
     /// Where what was read from each terminal transcript is kept between runs, so a launch does
     /// not reopen thousands of unchanged files; null keeps it for this run only.
     /// </param>
     public CatalogSyncService(SqliteCatalog catalog, string claudeConfigDir, GeminiPaths? gemini = null,
-        GeminiTakeoutStore? geminiWeb = null, string? probeCacheFile = null)
+        GeminiTakeoutStore? geminiWeb = null, string? probeCacheFile = null, Func<DshPaths>? dsh = null,
+        IReadOnlyList<WebExportStore>? webExports = null)
     {
         _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
         _claudeConfigDir = claudeConfigDir;
         _gemini = gemini;
         _geminiWeb = geminiWeb;
+        _webExports = webExports ?? [];
+        _dsh = dsh;
         _probeCacheFile = probeCacheFile;
         _cliProbes = probeCacheFile is null ? new CliProbeCache() : CliProbeCache.Load(probeCacheFile);
     }
@@ -65,11 +78,18 @@ public sealed class CatalogSyncService
     public SyncResult Sync(ClaudeInstallation installation, CodexPaths? codex = null, CancellationToken cancellation = default) =>
         Apply(Read(installation, codex, cancellation));
 
+    /// <summary>What one read of a source found: its rows, how many of its files could not be read this time, the note under its line in the report.</summary>
+    /// <param name="Accounts">For a source read from several places, the accounts read in full; null when it is one place.</param>
+    private sealed record SourceScan(List<SessionMetadata> Rows, int Unreadable, string Note,
+        IReadOnlyCollection<string>? Accounts = null);
+
     /// <summary>What one read of every source found, before any of it is written to the catalog.</summary>
     /// <param name="Complete">The backends read in full this time: only they can tell what is gone.</param>
+    /// <param name="CompleteAccounts">For a backend read from several places, the accounts it was read in full for.</param>
     public sealed record SyncRead(
         List<SessionMetadata> Rows, List<SourceTally> Tallies, int Linked, List<string> Unresolved, int NonRoot,
-        string? Warning, IReadOnlyList<string> Complete);
+        string? Warning, IReadOnlyList<string> Complete,
+        IReadOnlyDictionary<string, IReadOnlyCollection<string>>? CompleteAccounts = null);
 
     /// <summary>
     /// Reads every source. The catalog is not touched: this — nearly all of a sync's time —
@@ -120,60 +140,83 @@ public sealed class CatalogSyncService
                 $"未找到 {codexPaths.StateDatabase}"));
         }
 
-        // ---- Gemini CLI ------------------------------------------------------
-        // Listed only where it has been used: a computer without Gemini CLI's folder hears
-        // nothing about it, rather than a source "not found" in every report.
-        var geminiResolved = false;
-        if (_gemini is { Exists: true } gemini)
+        // ---- sources read the same way ------------------------------------
+        // Each is listed only where it is found: a computer without it hears nothing about it,
+        // rather than a source "not found" in every report.
+        var resolved = new Dictionary<string, bool>(StringComparer.Ordinal);
+        var scopes = new Dictionary<string, IReadOnlyCollection<string>>(StringComparer.Ordinal);
+        void ReadOne(string backend, Func<SourceScan> scan)
         {
             try
             {
-                var scan = new GeminiMetadataReader(gemini, _geminiProbes).Read(cancellation);
-                rows.AddRange(scan.Rows);
-                // A file that could not be read this time may be a session still listed: nothing
-                // is removed on the strength of an incomplete read.
-                geminiResolved = scan.Unreadable == 0;
+                var found = scan();
+                rows.AddRange(found.Rows);
+                // A file that could not be read this time may be a conversation still listed:
+                // nothing is marked gone on the strength of an incomplete read.
+                resolved[backend] = found.Unreadable == 0;
+                if (found.Accounts is { } accounts) scopes[backend] = accounts;
                 tallies.Add(new SourceTally(
-                    ConversationKey.Gemini, scan.Rows.Count, 0,
-                    scan.Unreadable == 0 ? SourceCoverage.Resolved : SourceCoverage.Partial,
-                    $"{scan.Projects} 个项目里共 {scan.Files} 个会话文件"
-                    + (scan.Unreadable > 0 ? $"，{scan.Unreadable} 个这次没能读取（正在写入或已损坏），下次同步再试" : "")
-                    + $"；{gemini.ProjectsRoot}"));
+                    backend, found.Rows.Count, found.Rows.Count(r => r.NativeArchiveState == NativeArchiveState.Archived),
+                    found.Unreadable == 0 ? SourceCoverage.Resolved : SourceCoverage.Partial, found.Note));
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                tallies.Add(new SourceTally(ConversationKey.Gemini, 0, 0, SourceCoverage.Unreachable, ex.Message));
-                warning ??= "Gemini CLI 来源读取失败，已保留缓存条目";
+                tallies.Add(new SourceTally(backend, 0, 0, SourceCoverage.Unreachable, ex.Message));
+                warning ??= $"{Sources.Of(backend)?.ReportName ?? backend} 来源读取失败，已保留缓存条目";
             }
         }
 
-        // ---- Gemini on the web, imported ------------------------------------
-        // This tool's own copy: nothing imported (or the import removed) means no rows of it.
-        var geminiWebResolved = false;
+        if (_gemini is { Exists: true } gemini)
+            ReadOne(ConversationKey.Gemini, () =>
+            {
+                var scan = new GeminiMetadataReader(gemini, _geminiProbes).Read(cancellation);
+                return new SourceScan(scan.Rows, scan.Unreadable,
+                    $"{scan.Projects} 个项目里共 {scan.Files} 个会话文件"
+                    + (scan.Unreadable > 0 ? $"，{scan.Unreadable} 个这次没能读取（正在写入或已损坏），下次同步再试" : "")
+                    + $"；{gemini.ProjectsRoot}");
+            });
+
+        // Gemini on the web: this tool's own copy — nothing imported (or the import removed) means no rows of it.
         if (_geminiWeb is { } store)
         {
-            if (!store.Exists) geminiWebResolved = true;
+            if (!store.Exists) resolved[ConversationKey.GeminiWeb] = true;
             else
-            {
-                try
+                ReadOne(ConversationKey.GeminiWeb, () =>
                 {
                     var scan = GeminiMetadataReader.ForTakeout(store, _geminiProbes).Read(cancellation);
-                    rows.AddRange(scan.Rows);
-                    geminiWebResolved = scan.Unreadable == 0;
-                    tallies.Add(new SourceTally(
-                        ConversationKey.GeminiWeb, scan.Rows.Count, 0,
-                        scan.Unreadable == 0 ? SourceCoverage.Resolved : SourceCoverage.Partial,
+                    return new SourceScan(scan.Rows, scan.Unreadable,
                         $"从 Google Takeout 导入的 {scan.Files} 段对话"
                         + (scan.Unreadable > 0 ? $"，{scan.Unreadable} 段这次没能读取" : "")
-                        + $"；{store.Root}"));
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    tallies.Add(new SourceTally(ConversationKey.GeminiWeb, 0, 0, SourceCoverage.Unreachable, ex.Message));
-                    warning ??= "导入的 Gemini 网页记录读取失败，已保留缓存条目";
-                }
-            }
+                        + $"；{store.Root}");
+                });
         }
+
+        // ChatGPT and Claude on the web: this tool's own copies of their exports, likewise.
+        foreach (var web in _webExports)
+        {
+            if (!web.Exists) resolved[web.Backend] = true;
+            else
+                ReadOne(web.Backend, () =>
+                {
+                    var scan = GeminiMetadataReader.ForImport(web, _geminiProbes).Read(cancellation);
+                    return new SourceScan(scan.Rows, scan.Unreadable,
+                        $"从数据导出导入的 {scan.Files} 段对话"
+                        + (scan.Unreadable > 0 ? $"，{scan.Unreadable} 段这次没能读取" : "")
+                        + $"；{web.Root}");
+                });
+        }
+
+        // DeepSeek Harness: a read is whole for the homes read, and says nothing about one no longer read.
+        if (_dsh?.Invoke() is { Exists: true } dsh)
+            ReadOne(ConversationKey.DeepSeek, () =>
+            {
+                var scan = new DshMetadataReader(dsh, _dshProbes).Read(cancellation);
+                return new SourceScan(scan.Rows, scan.Unreadable,
+                    $"{scan.Homes} 个数据目录里共 {scan.Files} 个会话"
+                    + (scan.Subagents > 0 ? $"，子代理会话 {scan.Subagents} 个不计入" : "")
+                    + (scan.Unreadable > 0 ? $"，{scan.Unreadable} 个这次没能读取（正在写入或已损坏），下次同步再试" : "")
+                    + "；" + string.Join("、", dsh.Homes), dsh.Homes);
+            });
 
         // ---- Desktop Code -------------------------------------------------
         if (installation.ProfileRoot is { Length: > 0 } profile)
@@ -291,9 +334,8 @@ public sealed class CatalogSyncService
         foreach (var backend in new[] { ConversationKey.DesktopCode, ConversationKey.CliCode })
             if (tallies.Any(t => t.Backend == backend && t.Coverage == SourceCoverage.Resolved)) complete.Add(backend);
         if (codexResolved) complete.Add(ConversationKey.Codex);
-        if (geminiResolved) complete.Add(ConversationKey.Gemini);
-        if (geminiWebResolved) complete.Add(ConversationKey.GeminiWeb);
-        return new SyncRead(rows, tallies, linked, unresolved, nonRoot, warning, complete);
+        complete.AddRange(resolved.Where(r => r.Value).Select(r => r.Key));
+        return new SyncRead(rows, tallies, linked, unresolved, nonRoot, warning, complete, scopes);
     }
 
     /// <summary>
@@ -307,7 +349,9 @@ public sealed class CatalogSyncService
         var changed = read.Rows.Count > 0 ? _catalog.UpsertRange(read.Rows) : 0;
         changed += _catalog.AdoptMergedPreferences();
         var removed = 0;
-        foreach (var backend in read.Complete) removed += _catalog.MarkGone(backend, read.Rows.Select(r => r.Key));
+        foreach (var backend in read.Complete)
+            removed += _catalog.MarkGone(backend, read.Rows.Select(r => r.Key),
+                read.CompleteAccounts is { } scopes && scopes.TryGetValue(backend, out var accounts) ? accounts : null);
 
         var coverage = SourceCoverageRules.Build(read.Tallies, read.Linked, read.Unresolved, read.NonRoot);
         TryWriteEvidence(coverage);

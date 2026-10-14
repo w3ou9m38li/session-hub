@@ -18,8 +18,9 @@ The full text of the Apache License 2.0 is at https://www.apache.org/licenses/LI
 ## Trademarks · 商标
 
 Claude is a trademark of Anthropic, PBC. ChatGPT and Codex are trademarks of OpenAI. Gemini is
-a trademark of Google LLC. 会话管家 is an independent third-party tool: it is not made, endorsed
+a trademark of Google LLC. DeepSeek is a trademark of its owner, Hangzhou DeepSeek Artificial
+Intelligence Co., Ltd. 会话管家 is an independent third-party tool: it is not made, endorsed
 or supported by any of them. The names are used only to say which applications' records it reads.
 
-Claude 是 Anthropic 的商标，ChatGPT 与 Codex 是 OpenAI 的商标，Gemini 是 Google 的商标。会话管家是独立的第三方工具，
+Claude 是 Anthropic 的商标，ChatGPT 与 Codex 是 OpenAI 的商标，Gemini 是 Google 的商标，DeepSeek 是杭州深度求索的商标。会话管家是独立的第三方工具，
 不是这些公司的产品，也没有得到它们的认可或支持；提到这些名字只是为了说明它读取哪些应用的记录。

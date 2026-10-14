@@ -7,7 +7,7 @@
     scale factor, and every line of text turns soft.
 -->
 <assembly manifestVersion="1.0" xmlns="urn:schemas-microsoft-com:asm.v1">
-  <assemblyIdentity version="0.18.0.0" name="ClaudeLauncher.App"/>
+  <assemblyIdentity version="0.23.0.0" name="ClaudeLauncher.App"/>
 
   <trustInfo xmlns="urn:schemas-microsoft-com:asm.v2">
     <security>

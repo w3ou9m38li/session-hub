@@ -35,18 +35,20 @@
             <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
         </Style>
 
-        <!-- One day (or month): Claude below, Codex and Gemini stacked on top, all to the same scale. -->
+        <!-- One day (or month): each app's share stacked, the first family at the bottom, all to the same scale. -->
         <DataTemplate x:Key="BarTemplate">
             <Grid Margin="1,0" Background="Transparent" ToolTip="{Binding Tip}">
                 <Grid.RowDefinitions>
                     <RowDefinition Height="112"/>
                     <RowDefinition Height="18"/>
                 </Grid.RowDefinitions>
-                <StackPanel VerticalAlignment="Bottom">
-                    <Border Height="{Binding GeminiHeight}" Background="{DynamicResource GeminiBrush}"/>
-                    <Border Height="{Binding CodexHeight}" Background="{DynamicResource CodexBrush}"/>
-                    <Border Height="{Binding ClaudeHeight}" Background="{DynamicResource ClaudeBrush}"/>
-                </StackPanel>
+                <ItemsControl ItemsSource="{Binding Segments}" VerticalAlignment="Bottom" Focusable="False" IsTabStop="False">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Height="{Binding Height}" Background="{Binding Fill}"/>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
                 <!-- Wider than its bar when the bars are thin: the margins give it room past the bar's edges. -->
                 <TextBlock Grid.Row="1" Text="{Binding Label}" FontSize="10.5" Foreground="{DynamicResource FaintBrush}"
                            HorizontalAlignment="Center" TextAlignment="Center" Margin="-40,4,-40,0"/>
@@ -109,15 +111,10 @@
             </Border>
             <Border DockPanel.Dock="Left" Margin="12,0,0,0" Background="{StaticResource RaisedBrush}" CornerRadius="6"
                     Padding="3" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
-                <StackPanel Orientation="Horizontal">
+                <!-- 「全部应用」, then one button per app family, added from the list of families. -->
+                <StackPanel x:Name="AppButtons" Orientation="Horizontal">
                     <RadioButton x:Name="AppBoth" Style="{StaticResource SegmentButton}" GroupName="App" Tag=""
                                  Content="全部应用" Checked="App_Checked"/>
-                    <RadioButton x:Name="AppClaude" Style="{StaticResource SegmentButton}" GroupName="App" Tag="Claude"
-                                 Content="Claude" Checked="App_Checked"/>
-                    <RadioButton x:Name="AppCodex" Style="{StaticResource SegmentButton}" GroupName="App" Tag="Codex"
-                                 Content="Codex" Checked="App_Checked"/>
-                    <RadioButton x:Name="AppGemini" Style="{StaticResource SegmentButton}" GroupName="App" Tag="Gemini"
-                                 Content="Gemini" Checked="App_Checked"/>
                 </StackPanel>
             </Border>
             <Button x:Name="RefreshButton" DockPanel.Dock="Right" Padding="12,6" Click="Refresh_Click"
@@ -132,7 +129,7 @@
         </DockPanel>
 
         <!-- ========================================================= totals -->
-        <UniformGrid Grid.Row="1" Columns="5" Margin="0,0,-10,14">
+        <UniformGrid Grid.Row="1" Columns="6" Margin="0,0,-10,14">
             <Border Style="{StaticResource Card}" ToolTip="输入、缓存读取、缓存写入、输出加在一起">
                 <StackPanel>
                     <TextBlock Text="合计" Style="{StaticResource CardLabel}"/>
@@ -168,20 +165,35 @@
                     <TextBlock Text="含思考 / 推理" Style="{StaticResource CardNote}"/>
                 </StackPanel>
             </Border>
+            <Border Style="{StaticResource Card}"
+                    ToolTip="每次调用平均读入的上下文：输入、缓存读取、缓存写入之和。会话越长越大，越贵也越慢；很长的会话压缩一下（Claude Code 的 /compact）或换个新会话就降下来。缓存命中是其中从缓存读取的比例，缓存读取的价格只有新输入的一小部分">
+                <StackPanel>
+                    <TextBlock Text="每次上下文" Style="{StaticResource CardLabel}"/>
+                    <TextBlock x:Name="ContextValue" Style="{StaticResource CardValue}" Text="—"/>
+                    <TextBlock x:Name="ContextNote" Style="{StaticResource CardNote}" Text="每次调用平均读入"/>
+                </StackPanel>
+            </Border>
         </UniformGrid>
 
         <!-- ========================================================== chart -->
         <Border x:Name="ChartSection" Grid.Row="2" Style="{StaticResource Card}" Margin="0,0,0,14">
             <DockPanel>
                 <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                    <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
-                        <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource ClaudeBrush}" Margin="0,0,5,0"/>
-                        <TextBlock Text="Claude" FontSize="12" Margin="0,0,14,0"/>
-                        <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource CodexBrush}" Margin="0,0,5,0"/>
-                        <TextBlock Text="Codex" FontSize="12" Margin="0,0,14,0"/>
-                        <Border Width="10" Height="10" CornerRadius="2" Background="{StaticResource GeminiBrush}" Margin="0,0,5,0"/>
-                        <TextBlock Text="Gemini" FontSize="12"/>
-                    </StackPanel>
+                    <ItemsControl x:Name="Legend" DockPanel.Dock="Right" VerticalAlignment="Center" Focusable="False" IsTabStop="False">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Horizontal"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate>
+                                <StackPanel Orientation="Horizontal" Margin="14,0,0,0">
+                                    <Border Width="10" Height="10" CornerRadius="2" Background="{Binding Fill}" Margin="0,0,5,0"/>
+                                    <TextBlock Text="{Binding Name}" FontSize="12"/>
+                                </StackPanel>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
                     <TextBlock x:Name="ChartTitle" DockPanel.Dock="Left" Text="按天" FontWeight="SemiBold"/>
                     <TextBlock x:Name="ChartPeak" Style="{StaticResource Muted}" FontSize="12" Margin="12,1,0,0"
                                TextTrimming="CharacterEllipsis"/>
@@ -224,10 +236,21 @@
             </Border>
             <Border Grid.Column="2" Style="{StaticResource Card}">
                 <DockPanel>
-                    <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
-                        <TextBlock DockPanel.Dock="Right" Text="双击在列表中定位" Style="{StaticResource CardNote}"
-                                   VerticalAlignment="Bottom"/>
-                        <TextBlock Text="用得最多的会话" FontWeight="SemiBold"/>
+                    <DockPanel DockPanel.Dock="Top" Margin="0,-4,0,6">
+                        <!-- Two views of the conversations: the ones that used most, the ones each call of which reads most. -->
+                        <Border DockPanel.Dock="Left" Background="{StaticResource WindowBrush}" CornerRadius="6" Padding="2"
+                                BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                            <StackPanel Orientation="Horizontal">
+                                <RadioButton x:Name="RankTotal" Style="{StaticResource SegmentButton}" GroupName="Rank" Tag=""
+                                             Content="用得最多的会话" Checked="Rank_Checked"
+                                             ToolTip="按用掉的 token 总量排"/>
+                                <RadioButton x:Name="RankPerCall" Style="{StaticResource SegmentButton}" GroupName="Rank"
+                                             Tag="PerCall" Content="每次上下文最大" Checked="Rank_Checked"
+                                             ToolTip="按每次调用平均读入的上下文排（至少 5 次调用的会话）：越大越贵也越慢，是该压缩或换个新会话的那些"/>
+                            </StackPanel>
+                        </Border>
+                        <TextBlock Text="双击在列表中定位" Style="{StaticResource CardNote}" TextAlignment="Right"
+                                   VerticalAlignment="Center" Margin="10,0,0,0"/>
                     </DockPanel>
                     <ScrollViewer VerticalScrollBarVisibility="Auto" Focusable="False">
                         <ItemsControl x:Name="ConversationList" ItemTemplate="{StaticResource RankTemplate}" Focusable="False"
@@ -241,6 +264,6 @@
 
         <TextBlock Grid.Row="4" Margin="2,12,0,0" TextWrapping="Wrap" FontSize="12" LineHeight="18"
                    Foreground="{StaticResource FaintBrush}"
-                   Text="读自本机的对话记录：Claude 每次回复里的 usage，Codex 每次回复后的 token_count，Gemini CLI 每次回复记下的 tokens（思考算作输出）。子代理、子任务算进它所属的会话；分叉和续接时复制过来的记录只算一次。每次调用都会把上下文重读一遍（多半记作缓存读取），所以缓存读取通常最大。只统计 token，不折算费用。"/>
+                   Text="读自本机的对话记录：Claude 每次回复里的 usage，Codex 每次回复后的 token_count，Gemini CLI 每次回复记下的 tokens（思考算作输出），DeepSeek Harness 每次回复的 usage（缓存读写与输入分开记，推理算在输出里）。子代理、子任务算进它所属的会话；分叉和续接时复制过来的记录只算一次。每次调用都会把上下文重读一遍（多半记作缓存读取），所以缓存读取通常最大；「每次上下文」就是平均每次读入多少。只统计 token，不折算费用。"/>
     </Grid>
 </Window>

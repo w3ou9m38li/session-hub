@@ -346,8 +346,9 @@ public sealed class GeminiTakeoutTests : IDisposable
         List<SessionMetadata> Sorted(SortField field) =>
             [.. catalog.Page(Visibility.Active, null, null, 100, GroupFilter.All, BackendFilter.All, new SortOrder(field, false)).Rows];
 
-        var bySource = Sorted(SortField.Source).Select(r => OrderingRules.SourceRank(r.Key.Backend)).ToList();
-        Assert.Equal([1, 2, 3, 4, 5], bySource);
+        Assert.Equal(
+            [ConversationKey.DesktopCode, ConversationKey.CliCode, ConversationKey.Codex, ConversationKey.Gemini, ConversationKey.GeminiWeb],
+            Sorted(SortField.Source).Select(r => r.Key.Backend));
         var byStanding = Sorted(SortField.AppState)
             .Select(r => (int)OrderingRules.Standing(r.Key.Backend, r.NativeArchiveState, r.ContinuedIn is not null)).ToList();
         Assert.Equal(byStanding.Order(), byStanding);

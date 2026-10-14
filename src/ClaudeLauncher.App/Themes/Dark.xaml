@@ -34,6 +34,8 @@
     <SolidColorBrush x:Key="CodexBrush" Color="#FF3F7F6E"/>
     <SolidColorBrush x:Key="CodexLineBrush" Color="#FF4F9A86"/>
     <SolidColorBrush x:Key="GeminiBrush" Color="#FF5B6FC9"/>
+    <SolidColorBrush x:Key="DeepSeekBrush" Color="#FF8A5CC2"/>
+    <SolidColorBrush x:Key="DeepSeekLineBrush" Color="#FF9D72D2"/>
     <SolidColorBrush x:Key="InfoBrush" Color="#FF8FB8C8"/>
     <SolidColorBrush x:Key="SuccessBrush" Color="#FF86C79A"/>
     <SolidColorBrush x:Key="WarnBrush" Color="#FFE0A062"/>
@@ -92,6 +94,8 @@
     <SolidColorBrush x:Key="CodexFillBrush" Color="#FF356E5F"/>
     <SolidColorBrush x:Key="GeminiTextBrush" Color="#FF95A8F0"/>
     <SolidColorBrush x:Key="GeminiFillBrush" Color="#FF4A5CB0"/>
+    <SolidColorBrush x:Key="DeepSeekTextBrush" Color="#FFC3A3F0"/>
+    <SolidColorBrush x:Key="DeepSeekFillBrush" Color="#FF6E4AA8"/>
 
     <!-- What stock templates still reach for: the scroll viewer's corner, selection. -->
     <SolidColorBrush x:Key="{x:Static SystemColors.ControlBrushKey}" Color="#FF232326"/>
@@ -223,6 +227,13 @@
     <Style x:Key="CodexButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
         <Setter Property="Background" Value="{DynamicResource CodexBrush}"/>
         <Setter Property="BorderBrush" Value="{DynamicResource CodexLineBrush}"/>
+        <Setter Property="Foreground" Value="{DynamicResource OnAccentTextBrush}"/>
+        <Setter Property="FontWeight" Value="SemiBold"/>
+    </Style>
+
+    <Style x:Key="DeepSeekButton" TargetType="Button" BasedOn="{StaticResource {x:Type Button}}">
+        <Setter Property="Background" Value="{DynamicResource DeepSeekBrush}"/>
+        <Setter Property="BorderBrush" Value="{DynamicResource DeepSeekLineBrush}"/>
         <Setter Property="Foreground" Value="{DynamicResource OnAccentTextBrush}"/>
         <Setter Property="FontWeight" Value="SemiBold"/>
     </Style>
