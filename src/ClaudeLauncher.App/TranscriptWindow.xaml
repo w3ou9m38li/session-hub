@@ -1,0 +1,371 @@
+<Window x:Class="ClaudeLauncher.App.TranscriptWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeLauncher.App"
+        xmlns:sys="clr-namespace:System;assembly=mscorlib"
+        Title="对话记录" Height="780" Width="1040" MinWidth="660" MinHeight="420"
+        Icon="app.ico"
+        WindowStartupLocation="Manual"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Text sizes the reader can change with Ctrl+wheel / Ctrl+= / Ctrl+- (Ctrl+0 resets). -->
+        <sys:Double x:Key="MessageFontSize">13.5</sys:Double>
+        <sys:Double x:Key="LineFontSize">12</sys:Double>
+        <sys:Double x:Key="DetailFontSize">12</sys:Double>
+        <sys:Double x:Key="MessageLineHeight">21.6</sys:Double>
+        <sys:Double x:Key="MessageH1FontSize">19.6</sys:Double>
+        <sys:Double x:Key="MessageH2FontSize">17.5</sys:Double>
+        <sys:Double x:Key="MessageH3FontSize">15.5</sys:Double>
+
+        <!-- What the two sides said: a bubble each, the text selectable; the assistant's
+             Markdown rendered, the user's words as typed. -->
+        <DataTemplate x:Key="BubbleTemplate">
+            <Border x:Name="Bubble" Margin="{Binding BubbleMargin}" Padding="14,10,14,11" CornerRadius="8"
+                    Background="{Binding Background}" BorderThickness="1.5" BorderBrush="Transparent">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,6">
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Timestamp}" Foreground="{StaticResource FaintBrush}"
+                                   FontSize="11" VerticalAlignment="Center"/>
+                        <!-- One click copies this message whole. Not focusable, like the rows: the
+                             keyboard stays with the list. The negative margin keeps the header as tall as its text. -->
+                        <Button DockPanel.Dock="Right" Width="24" Height="22" Margin="0,-4,6,-4" FontSize="12"
+                                Focusable="False" Click="CopyMessage_Click" AutomationProperties.Name="复制这条消息">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource IconButton}">
+                                    <Setter Property="Content" Value="&#xE8C8;"/>
+                                    <Setter Property="ToolTip" Value="复制这条消息（全文）"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding JustCopied}" Value="True">
+                                            <Setter Property="Content" Value="&#xE73E;"/>
+                                            <Setter Property="Foreground" Value="{StaticResource SuccessBrush}"/>
+                                            <Setter Property="ToolTip" Value="已复制"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <!-- Chooses the message for 「复制选中的」/「导出选中的…」; Shift chooses the run up to it. -->
+                        <Button DockPanel.Dock="Right" Width="24" Height="22" Margin="0,-4,2,-4" FontSize="12"
+                                Focusable="False" Click="SelectMessage_Click" AutomationProperties.Name="选中这条消息">
+                            <Button.Style>
+                                <Style TargetType="Button" BasedOn="{StaticResource IconButton}">
+                                    <Setter Property="Content" Value="&#xE739;"/>
+                                    <Setter Property="ToolTip" Value="选中这条，好几条一起复制或导出（按住 Shift 点：连选一段）"/>
+                                    <Style.Triggers>
+                                        <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                                            <Setter Property="Content" Value="&#xE73A;"/>
+                                            <Setter Property="Foreground" Value="{StaticResource InfoBrush}"/>
+                                            <Setter Property="ToolTip" Value="已选中（再点一下取消；按住 Shift 点：连选一段）"/>
+                                        </DataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <TextBlock Text="{Binding Speaker}" FontWeight="SemiBold" Foreground="{Binding Accent}" FontSize="12"
+                                   VerticalAlignment="Center"/>
+                    </DockPanel>
+                    <RichTextBox Style="{StaticResource MessageText}"
+                                 local:MessageContent.Message="{Binding}"
+                                 local:MessageContent.Highlight="{Binding HighlightTerm}"
+                                 FontFamily="{Binding FontFamily}" Foreground="{Binding Foreground}"
+                                 FontSize="{DynamicResource MessageFontSize}"
+                                 AutomationProperties.Name="{Binding Speaker}"/>
+                </StackPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsSelected}" Value="True">
+                    <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource InfoBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsMatch}" Value="True">
+                    <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource MatchLineBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsCurrentMatch}" Value="True">
+                    <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource WarnBrush}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- Tool calls, tool output, folded context: one quiet line, the bulk behind the arrow. -->
+        <DataTemplate x:Key="CompactTemplate">
+            <Border x:Name="Row" Margin="12,1,12,1" Padding="4,1" CornerRadius="4" BorderThickness="1.5"
+                    BorderBrush="Transparent">
+                <Expander IsExpanded="{Binding IsExpanded, Mode=TwoWay}">
+                    <Expander.Header>
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Right" Text="{Binding Timestamp}" Foreground="{StaticResource FaintBrush}"
+                                       FontSize="11" Margin="12,0,2,0" VerticalAlignment="Center"/>
+                            <TextBlock DockPanel.Dock="Left" Text="{Binding Speaker}" Foreground="{StaticResource FaintBrush}"
+                                       FontSize="11.5" Width="56" VerticalAlignment="Center"/>
+                            <TextBlock Text="{Binding Text}" FontFamily="{StaticResource MonoFont}"
+                                       FontSize="{DynamicResource LineFontSize}"
+                                       Foreground="{StaticResource MutedBrush}" TextTrimming="CharacterEllipsis"
+                                       VerticalAlignment="Center"/>
+                        </DockPanel>
+                    </Expander.Header>
+                    <TextBox Style="{StaticResource DetailText}" Text="{Binding Detail, Mode=OneWay}" Margin="19,4,2,6"
+                             FontSize="{DynamicResource DetailFontSize}"/>
+                </Expander>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsMatch}" Value="True">
+                    <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource MatchLineBrush}"/>
+                </DataTrigger>
+                <DataTrigger Binding="{Binding IsCurrentMatch}" Value="True">
+                    <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource WarnBrush}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- A line with nothing behind it (an image placeholder). -->
+        <DataTemplate x:Key="PlainTemplate">
+            <Border x:Name="Row" Margin="12,1,12,1" Padding="24,4,6,4" CornerRadius="4" BorderThickness="1.5"
+                    BorderBrush="Transparent">
+                <DockPanel>
+                    <TextBlock DockPanel.Dock="Right" Text="{Binding Timestamp}" Foreground="{StaticResource FaintBrush}"
+                               FontSize="11" Margin="12,0,0,0"/>
+                    <TextBlock DockPanel.Dock="Left" Text="{Binding Speaker}" Foreground="{StaticResource FaintBrush}"
+                               FontSize="11.5" Width="56"/>
+                    <TextBlock Text="{Binding Text}" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                               TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+            </Border>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding IsCurrentMatch}" Value="True">
+                    <Setter TargetName="Row" Property="BorderBrush" Value="{StaticResource WarnBrush}"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- A picture the user sent: on their side, scaled down; a click opens it at full size. -->
+        <DataTemplate x:Key="PictureTemplate">
+            <Border x:Name="Bubble" Margin="64,6,12,6" Padding="12,9,12,12" CornerRadius="8" HorizontalAlignment="Right"
+                    Background="{Binding Background}" BorderThickness="1.5" BorderBrush="Transparent">
+                <StackPanel>
+                    <DockPanel Margin="0,0,0,7">
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Timestamp}" Foreground="{StaticResource FaintBrush}"
+                                   FontSize="11" Margin="16,0,0,0" VerticalAlignment="Center"/>
+                        <TextBlock FontSize="12" VerticalAlignment="Center">
+                            <Run Text="{Binding Speaker, Mode=OneWay}" Foreground="{Binding Accent, Mode=OneWay}" FontWeight="SemiBold"/><Run
+                                Text="{Binding Text, Mode=OneWay}" Foreground="{StaticResource FaintBrush}"/>
+                        </TextBlock>
+                    </DockPanel>
+                    <Button Click="Picture_Click" Cursor="Hand" ToolTip="点击查看原图（右键可复制、另存）"
+                            AutomationProperties.Name="查看图片" HorizontalAlignment="Left" Focusable="False">
+                        <Button.Template>
+                            <ControlTemplate TargetType="Button">
+                                <ContentPresenter/>
+                            </ControlTemplate>
+                        </Button.Template>
+                        <Grid MinWidth="120" MinHeight="60">
+                            <Image Source="{Binding Thumbnail}" MaxWidth="480" MaxHeight="300"
+                                   Stretch="Uniform" StretchDirection="DownOnly" RenderOptions.BitmapScalingMode="HighQuality"/>
+                            <TextBlock Text="图片无法显示" Foreground="{StaticResource FaintBrush}" FontSize="12"
+                                       VerticalAlignment="Center" HorizontalAlignment="Center"
+                                       Visibility="{Binding ThumbnailFailed, Converter={StaticResource BoolToVis}}"/>
+                        </Grid>
+                    </Button>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <local:TranscriptTemplateSelector x:Key="EntryTemplates"
+                                          Bubble="{StaticResource BubbleTemplate}"
+                                          Compact="{StaticResource CompactTemplate}"
+                                          Plain="{StaticResource PlainTemplate}"
+                                          Picture="{StaticResource PictureTemplate}"/>
+    </Window.Resources>
+
+    <Grid Margin="16,12,16,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <DockPanel>
+            <!-- One click puts the conversation in the favourites, or takes it out again; the main
+                 list's 「★ 收藏」 filter finds it. The negative margin keeps the line as tall as the title. -->
+            <Button x:Name="FavoriteButton" DockPanel.Dock="Left" Style="{StaticResource IconButton}"
+                    Width="30" Height="30" Margin="-6,-5,2,-5" FontSize="17" Content="&#xE734;"
+                    Foreground="{StaticResource MutedBrush}" Focusable="False" Click="Favorite_Click"
+                    AutomationProperties.Name="收藏这条会话"/>
+            <TextBlock x:Name="TitleLine" FontSize="16" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                       VerticalAlignment="Center"/>
+        </DockPanel>
+        <StackPanel Grid.Row="1" Margin="0,5,0,12">
+            <TextBlock x:Name="MetaLine" Style="{StaticResource Muted}" TextTrimming="CharacterEllipsis">
+                <Run x:Name="MetaRun"/><Run Text="　·　"/><Hyperlink x:Name="RevealLink" Click="RevealFile_Click">在文件夹中显示</Hyperlink><Run
+                    x:Name="OpenInAppGap" Text="　·　"/><Hyperlink x:Name="OpenInAppLink" Click="OpenInApp_Click"><Run
+                    x:Name="OpenInAppRun" Text="在应用中打开"/></Hyperlink>
+            </TextBlock>
+            <!-- A conversation Claude continued across transcripts: where the rest of it is. -->
+            <DockPanel x:Name="ContinuationBar" Margin="0,6,0,0" Visibility="Collapsed">
+                <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="12" Text="&#xE71B;"
+                           Foreground="{StaticResource InfoBrush}" Margin="0,1,6,0" VerticalAlignment="Top"/>
+                <TextBlock x:Name="ContinuationLine" Style="{StaticResource Muted}" TextWrapping="Wrap"/>
+            </DockPanel>
+        </StackPanel>
+
+        <!-- ================================================== toolbar -->
+        <DockPanel Grid.Row="2" Margin="0,0,0,8" LastChildFill="False">
+            <Grid DockPanel.Dock="Left" Width="290">
+                <TextBox x:Name="FindBox" Padding="30,5,30,5" VerticalContentAlignment="Center"
+                         AutomationProperties.Name="在对话中查找"
+                         TextChanged="FindBox_TextChanged" PreviewKeyDown="FindBox_PreviewKeyDown"
+                         ToolTip="查找显示出来的文字；勾选「展开工具内容」后也查找工具参数与输出&#x0a;F3 逐处跳转：一条长消息里的每一处都会走到；到最后一处后会继续读后面的部分"/>
+                <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE721;" Foreground="{StaticResource FaintBrush}"
+                           Margin="11,0,0,0" HorizontalAlignment="Left" IsHitTestVisible="False"/>
+                <TextBlock x:Name="FindHint" Text="在对话中查找（Ctrl+F）" Foreground="{StaticResource FaintBrush}"
+                           Margin="32,0,30,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                           TextTrimming="CharacterEllipsis"/>
+                <Button x:Name="ClearFindButton" Style="{StaticResource IconButton}" Content="&#xE711;"
+                        HorizontalAlignment="Right" Margin="0,0,2,0" Visibility="Collapsed"
+                        Click="ClearFind_Click" ToolTip="清除查找（Esc）" AutomationProperties.Name="清除查找"/>
+            </Grid>
+            <Button DockPanel.Dock="Left" Style="{StaticResource IconButton}" Content="&#xE70E;" Margin="6,0,0,0"
+                    Click="FindPrevious_Click" ToolTip="上一处（Shift+F3）" AutomationProperties.Name="上一个匹配"/>
+            <Button DockPanel.Dock="Left" Style="{StaticResource IconButton}" Content="&#xE70D;"
+                    Click="FindNext_Click" ToolTip="下一处（F3 / Enter）" AutomationProperties.Name="下一个匹配"/>
+            <TextBlock DockPanel.Dock="Left" x:Name="MatchCount" Style="{StaticResource Muted}" VerticalAlignment="Center"
+                       Margin="6,0,18,0" MinWidth="40"/>
+
+            <CheckBox DockPanel.Dock="Left" x:Name="DialogueOnly" VerticalAlignment="Center" Margin="0,0,16,0"
+                      Content="只看对话" Checked="DialogueOnly_Changed" Unchecked="DialogueOnly_Changed"
+                      ToolTip="隐藏工具调用、工具输出和系统提示，只留下你和助手说的话"/>
+            <CheckBox DockPanel.Dock="Left" x:Name="ExpandTools" VerticalAlignment="Center"
+                      Content="展开工具内容" Checked="ExpandTools_Changed" Unchecked="ExpandTools_Changed"
+                      ToolTip="工具调用的参数和输出默认折叠；勾选后全部展开，导出也会包含"/>
+
+            <Button DockPanel.Dock="Right" x:Name="LatestButton" Padding="10,5" Click="Latest_Click" AutomationProperties.Name="跳到最新"
+                    ToolTip="读到记录结尾并跳到最新的消息（Ctrl+End）">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE74B;" Margin="0,0,6,0"/>
+                    <TextBlock Text="最新"/>
+                </StackPanel>
+            </Button>
+            <Button DockPanel.Dock="Right" Padding="10,5" Margin="0,0,6,0" Click="Top_Click" AutomationProperties.Name="回到开头"
+                    ToolTip="回到开头（Ctrl+Home）">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE74A;" Margin="0,0,6,0"/>
+                    <TextBlock Text="开头"/>
+                </StackPanel>
+            </Button>
+        </DockPanel>
+
+        <!-- ===================================================== list -->
+        <Border Grid.Row="3" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}"
+                BorderThickness="1">
+            <Grid>
+                <!-- Virtualised: a long conversation must not realise every bubble. Scrolled by
+                     pixel, not by item: a message three screens tall must not jump past in one
+                     notch of the wheel. -->
+                <ListBox x:Name="MessageList"
+                         Background="Transparent" BorderThickness="0" Padding="0,6"
+                         ItemTemplateSelector="{StaticResource EntryTemplates}"
+                         VirtualizingPanel.IsVirtualizing="True"
+                         VirtualizingPanel.VirtualizationMode="Recycling"
+                         VirtualizingPanel.ScrollUnit="Pixel"
+                         ScrollViewer.CanContentScroll="True"
+                         ScrollViewer.PanningMode="VerticalOnly"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         HorizontalContentAlignment="Stretch"
+                         AutomationProperties.Name="对话内容">
+                    <ListBox.ItemContainerStyle>
+                        <!-- Messages are read, not selected: no row highlight, no focus stop. -->
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Focusable" Value="False"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <ContentPresenter/>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                </ListBox>
+
+                <!-- While 「最新」 shows the end read from the end of the file. -->
+                <Border x:Name="TailBanner" Visibility="Collapsed" VerticalAlignment="Top" HorizontalAlignment="Center"
+                        Margin="0,8,0,0" Padding="12,5" CornerRadius="12" Background="{StaticResource RaisedBrush}"
+                        BorderBrush="{StaticResource LineBrush}" BorderThickness="1" IsHitTestVisible="False">
+                    <TextBlock Text="先显示最后的内容 · 正在载入整段对话…" Foreground="{StaticResource MutedBrush}" FontSize="12"/>
+                </Border>
+
+                <TextBlock x:Name="Placeholder" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           Foreground="{StaticResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap"
+                           MaxWidth="420" Text="正在读取对话…"/>
+            </Grid>
+        </Border>
+
+        <!-- ==================================================== footer -->
+        <DockPanel Grid.Row="4" Margin="0,10,0,0">
+            <StackPanel DockPanel.Dock="Right" x:Name="SelectionButtons" Orientation="Horizontal" Visibility="Collapsed">
+                <Button Style="{StaticResource GhostButton}" Click="SelectAll_Click" Margin="0,0,8,0"
+                        Content="全选" ToolTip="选中已显示的全部发言（你和助手说的话）"/>
+                <Button Style="{StaticResource GhostButton}" Click="ClearSelection_Click" Margin="0,0,8,0"
+                        Content="取消选择" ToolTip="取消选择（Esc）"/>
+                <Button Click="CopySelected_Click" Margin="0,0,8,0" AutomationProperties.Name="复制选中的发言"
+                        ToolTip="把选中的发言按对话里的顺序复制到剪贴板（Ctrl+C）">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8C8;" Margin="0,0,7,0"/>
+                        <TextBlock x:Name="CopySelectedText" Text="复制选中的"/>
+                    </StackPanel>
+                </Button>
+                <Button Click="ExportSelected_Click" AutomationProperties.Name="导出选中的发言"
+                        ToolTip="把选中的发言存成 Markdown、网页或文本">
+                    <StackPanel Orientation="Horizontal">
+                        <TextBlock Style="{StaticResource IconGlyph}" Text="&#xEDE1;" Margin="0,0,7,0"/>
+                        <TextBlock Text="导出选中的…"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+            <Button DockPanel.Dock="Right" x:Name="ExportButton" Click="Export_Click" Margin="8,0,0,0" AutomationProperties.Name="导出对话记录"
+                    ToolTip="把整条对话（不只是已显示的部分）存成 Markdown，或存成一个网页：排版和图片都在里面，双击就能用浏览器看">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xEDE1;" Margin="0,0,7,0"/>
+                    <TextBlock Text="导出…"/>
+                </StackPanel>
+            </Button>
+            <Button DockPanel.Dock="Right" x:Name="CopyButton" Click="Copy_Click" AutomationProperties.Name="复制全部对话"
+                    ToolTip="把整条对话里你和助手说的话复制到剪贴板（不含工具内容）">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8C8;" Margin="0,0,7,0"/>
+                    <TextBlock Text="复制全部对话"/>
+                </StackPanel>
+            </Button>
+            <Button DockPanel.Dock="Right" x:Name="ChangesButton" Click="Changes_Click" Margin="0,0,8,0" AutomationProperties.Name="改动的文件"
+                    ToolTip="这条对话用 Edit、Write、apply_patch 改过哪些文件，每次改了什么">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8F1;" Margin="0,0,7,0"/>
+                    <TextBlock Text="改动的文件"/>
+                </StackPanel>
+            </Button>
+            <Button DockPanel.Dock="Right" x:Name="AnalyzeButton" Click="Analyze_Click" Margin="0,0,8,0" AutomationProperties.Name="分析这条对话"
+                    ToolTip="每次调用的上下文有多大、缓存过期后重写了几次、压缩了几次、哪些工具占得最多">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE9D2;" Margin="0,0,7,0"/>
+                    <TextBlock Text="分析"/>
+                </StackPanel>
+            </Button>
+            <Button DockPanel.Dock="Right" x:Name="StopButton" Style="{StaticResource GhostButton}" Content="停止"
+                    Click="Stop_Click" Visibility="Collapsed" Margin="0,0,8,0" ToolTip="停止读取（Esc）"/>
+            <TextBlock DockPanel.Dock="Left" x:Name="StatusGlyph" Style="{StaticResource IconGlyph}" FontSize="12"
+                       Margin="0,0,8,0" Foreground="{StaticResource FaintBrush}"/>
+            <TextBlock x:Name="StatusLine" VerticalAlignment="Center" Foreground="{StaticResource MutedBrush}"
+                       AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="状态"
+                       FontSize="12" TextTrimming="CharacterEllipsis">
+                <Run x:Name="StatusRun"/><Run x:Name="StatusGap"/><Hyperlink x:Name="StatusLink" Click="StatusLink_Click"><Run
+                    x:Name="StatusLinkRun"/></Hyperlink>
+            </TextBlock>
+        </DockPanel>
+    </Grid>
+</Window>

@@ -1,0 +1,969 @@
+﻿<Window x:Class="ClaudeLauncher.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeLauncher.App"
+        Title="会话管家 · Claude / ChatGPT" Height="780" Width="1280" MinHeight="540" MinWidth="920"
+        Icon="app.ico"
+        WindowStartupLocation="CenterScreen"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display"
+        AllowDrop="True" PreviewDragOver="Window_PreviewDragOver" PreviewDragLeave="Window_PreviewDragLeave"
+        PreviewDrop="Window_PreviewDrop">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Dark header: the default one is a white strip in an otherwise dark window. Headers
+             sort the list when clicked, so they answer the pointer like buttons do. -->
+        <Style x:Key="ListHeader" TargetType="GridViewColumnHeader">
+            <Setter Property="Foreground" Value="{StaticResource HeaderTextBrush}"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="HorizontalContentAlignment" Value="Left"/>
+            <Setter Property="Cursor" Value="Hand"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GridViewColumnHeader">
+                        <Grid>
+                            <Border x:Name="Bd" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="0,0,1,1" Padding="10,6">
+                                <ContentPresenter HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
+                                                  VerticalAlignment="Center" RecognizesAccessKey="False"/>
+                            </Border>
+                            <!-- Keeps column resizing: the gripper is what the default template names. -->
+                            <Thumb x:Name="PART_HeaderGripper" HorizontalAlignment="Right"
+                                   Width="8" Margin="0,0,-4,0" Cursor="SizeWE">
+                                <Thumb.Template>
+                                    <ControlTemplate TargetType="Thumb">
+                                        <Border Background="Transparent" Width="8"/>
+                                    </ControlTemplate>
+                                </Thumb.Template>
+                            </Thumb>
+                        </Grid>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HeaderHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource HeaderPressedBrush}"/>
+                            </Trigger>
+                            <!-- The filler to the right of the last column sorts nothing. -->
+                            <Trigger Property="Role" Value="Padding">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RaisedBrush}"/>
+                                <Setter Property="Cursor" Value="Arrow"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Selection and hover in the same dark palette: the default light highlight made the
+             selected row's white text unreadable. -->
+        <Style x:Key="ListRow" TargetType="ListViewItem">
+            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+            <Setter Property="Background" Value="Transparent"/>
+            <Setter Property="Padding" Value="4,4"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+            <Setter Property="AutomationProperties.Name" Value="{Binding Title}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListViewItem">
+                        <Border x:Name="Bd" Background="{TemplateBinding Background}" BorderThickness="2,0,0,0"
+                                BorderBrush="Transparent" Padding="{TemplateBinding Padding}" SnapsToDevicePixels="True">
+                            <GridViewRowPresenter Content="{TemplateBinding Content}"
+                                                  Columns="{TemplateBinding GridView.ColumnCollection}"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource RowHoverBrush}"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+                            </Trigger>
+                            <MultiTrigger>
+                                <MultiTrigger.Conditions>
+                                    <Condition Property="IsSelected" Value="True"/>
+                                    <Condition Property="Selector.IsSelectionActive" Value="False"/>
+                                </MultiTrigger.Conditions>
+                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionInactiveBrush}"/>
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource SelectionInactiveLineBrush}"/>
+                            </MultiTrigger>
+                            <!-- Keyboard focus without selection (Ctrl+arrow) still needs to be visible. -->
+                            <Trigger Property="IsKeyboardFocused" Value="True">
+                                <Setter TargetName="Bd" Property="BorderBrush" Value="{StaticResource FocusBrush}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style x:Key="DetailLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource FaintBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+            <Setter Property="Margin" Value="0,0,10,0"/>
+            <Setter Property="VerticalAlignment" Value="Top"/>
+            <Setter Property="Padding" Value="0,1,0,0"/>
+        </Style>
+    </Window.Resources>
+
+    <Grid Margin="14,12,14,10">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ======================================================= toolbar -->
+        <!-- The two launch buttons come first and never wait for indexing. -->
+        <Grid Grid.Row="0" Margin="0,0,0,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="220" MaxWidth="560"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="Auto"/>
+            </Grid.ColumnDefinitions>
+
+            <Button x:Name="OpenClaudeButton" Style="{StaticResource ClaudeButton}" Padding="16,7"
+                    Click="OpenClaude_Click" Content="打开 Claude"
+                    ToolTip="启动或切换到官方 Claude 桌面版"/>
+            <StackPanel Grid.Column="1" Orientation="Horizontal">
+                <Button x:Name="OpenChatGptButton" Margin="8,0,0,0" Style="{StaticResource CodexButton}"
+                        Padding="16,7" Click="OpenChatGpt_Click" Content="打开 ChatGPT"
+                        ToolTip="有「Codex++（全部任务）」快捷方式时走快捷方式，否则启动商店版"/>
+                <Button x:Name="OpenDeepSeekButton" Margin="8,0,0,0" Style="{StaticResource DeepSeekButton}"
+                        Padding="16,7" Click="OpenDeepSeek_Click" Content="打开 DeepSeek" Visibility="Collapsed"
+                        AutomationProperties.Name="打开 DeepSeek Harness"
+                        ToolTip="通过你自己的快捷方式启动 DeepSeek Harness，在浏览器里打开"/>
+            </StackPanel>
+
+            <Grid Grid.Column="2" Margin="18,0,8,0">
+                <TextBox x:Name="SearchBox" Padding="30,6,32,6" VerticalContentAlignment="Center"
+                         AutomationProperties.Name="搜索会话"
+                         TextChanged="SearchBox_TextChanged" PreviewKeyDown="SearchBox_PreviewKeyDown"
+                         PreviewMouseLeftButtonUp="SearchBox_PreviewMouseLeftButtonUp"
+                         ToolTip="按标题、工作目录、会话 ID 或对话内容搜索。对话内容指你和助手说过的话（不含工具输出），两个字起才会搜。&#x0a;多个词用空格隔开时每个词都要出现；-词 排除含这个词的会话；“一整句”用引号括起来按整句找&#x0a;支持中文子串与全半角；搜索时默认按相关度排序&#x0a;最近的搜索：点空的搜索框、点右边的时钟，或按 Alt+↓"/>
+                <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE721;" Foreground="{StaticResource FaintBrush}"
+                           Margin="11,0,0,0" HorizontalAlignment="Left" IsHitTestVisible="False"/>
+                <TextBlock x:Name="SearchHint" Text="搜索标题、目录、ID 或对话内容" Foreground="{StaticResource FaintBrush}"
+                           Margin="32,0,70,0" VerticalAlignment="Center" IsHitTestVisible="False"
+                           TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="SearchShortcutHint" Text="Ctrl+F" Style="{StaticResource KeyHint}"
+                           HorizontalAlignment="Right" Margin="0,0,10,0" IsHitTestVisible="False"/>
+                <ToggleButton x:Name="MineOnlyToggle" Style="{StaticResource ChipToggle}" Content="只搜我说的"
+                              HorizontalAlignment="Right" VerticalAlignment="Center" Margin="0,0,34,0"
+                              Visibility="Collapsed" Focusable="False" Checked="MineOnly_Changed" Unchecked="MineOnly_Changed"
+                              AutomationProperties.Name="只搜我说的"
+                              ToolTip="对话内容只在你说过的话里找，不看助手的回答&#x0a;标题、目录、ID、名字和备注照常搜"/>
+                <Button x:Name="ClearSearchButton" Style="{StaticResource IconButton}" Content="&#xE711;"
+                        HorizontalAlignment="Right" Margin="0,0,3,0" Visibility="Collapsed"
+                        Click="ClearSearch_Click" ToolTip="清除搜索（Esc）" AutomationProperties.Name="清除搜索"/>
+                <!-- Not focusable: a click leaves the keyboard in the search box, ready for ↑↓ and Enter. -->
+                <Button x:Name="SearchHistoryButton" Style="{StaticResource IconButton}" Content="&#xE81C;"
+                        HorizontalAlignment="Right" Margin="0,0,3,0" Visibility="Collapsed" Focusable="False"
+                        Click="SearchHistoryButton_Click" ToolTip="最近的搜索（Alt+↓）" AutomationProperties.Name="最近的搜索"/>
+
+                <Popup x:Name="SearchHistoryPopup" PlacementTarget="{Binding ElementName=SearchBox}" Placement="Bottom"
+                       VerticalOffset="4" StaysOpen="False" AllowsTransparency="True" PopupAnimation="Fade"
+                       Focusable="False" Closed="SearchHistoryPopup_Closed">
+                    <local:SearchHistoryPanel x:Name="SearchHistoryList"/>
+                </Popup>
+            </Grid>
+
+            <Button x:Name="SyncButton" Grid.Column="3" Click="Sync_Click" Padding="12,6" AutomationProperties.Name="同步"
+                    ToolTip="重新扫描 Claude 与 ChatGPT 的本地记录（F5）。只读，不改动任何应用数据&#x0a;切回本窗口时、以及窗口开着时每分钟，会自动在后台检查一次">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock x:Name="SyncGlyph" Style="{StaticResource IconGlyph}" Text="&#xE72C;" Margin="0,0,7,0"
+                               RenderTransformOrigin="0.5,0.5">
+                        <TextBlock.RenderTransform>
+                            <RotateTransform x:Name="SyncSpin" Angle="0"/>
+                        </TextBlock.RenderTransform>
+                    </TextBlock>
+                    <TextBlock x:Name="SyncLabel" Text="同步"/>
+                </StackPanel>
+            </Button>
+
+            <Button x:Name="MoreButton" Grid.Column="5" Style="{StaticResource IconButton}" Width="32" Height="32"
+                    FontSize="15" Content="&#xE712;" Click="More_Click"
+                    ToolTip="更多：导出清单、打开数据目录、快捷键、版本" AutomationProperties.Name="更多">
+                <Button.ContextMenu>
+                    <ContextMenu x:Name="MoreMenu" Placement="Bottom">
+                        <MenuItem Header="导出全部会话清单" Click="Export_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xEDE1;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="打开导出目录" Click="OpenExportFolder_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE838;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="打开数据目录" Click="OpenDataRoot_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B7;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="导入 ChatGPT 网页版（数据导出）…" Click="ImportChatGptWeb_Click"
+                                  ToolTip="把 chatgpt.com 上的对话导进来：先在 ChatGPT 的设置里导出数据，再选中邮件里下载的压缩包&#x0a;窗口里有分步说明">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B5;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="导入 Claude 网页版（数据导出）…" Click="ImportClaudeWeb_Click"
+                                  ToolTip="把 claude.ai 上的对话导进来：先在 Claude 的设置里导出数据，再选中邮件里下载的压缩包&#x0a;窗口里有分步说明">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B5;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="导入 Gemini 网页版（Google Takeout）…" Click="ImportTakeout_Click"
+                                  ToolTip="把 gemini.google.com 上的对话导进来：先在 Google Takeout 导出，再选中下载的压缩包&#x0a;窗口里有分步说明">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B5;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="DeepSeek Harness 的会话位置…" Click="DshHomes_Click"
+                                  ToolTip="读 DeepSeek Harness（dsh）保存的会话：DSH_HOME 和 .dsh 自动找；&#x0a;用启动脚本把 DSH_HOME 指到别处的（本地部署的 data 文件夹），在这里添加">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8DA;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="用量统计…" Click="Usage_Click"
+                                  ToolTip="读本机的对话记录，统计 Claude、Codex、Gemini CLI 与 DeepSeek Harness 用了多少 token：按天、模型、工作目录、会话">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE9D2;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="让 Claude / Codex 查历史（MCP）…" Click="Mcp_Click"
+                                  ToolTip="让 Claude Code、Codex 等通过 MCP 搜索和阅读这里的历史对话：只读，由它们单独启动，不影响这个窗口">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE943;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <Separator/>
+                        <MenuItem x:Name="MenuHotkey" Header="全局快捷键 Ctrl+Alt+Space" IsCheckable="True"
+                                  Click="HotkeySetting_Click"
+                                  ToolTip="在任何地方按 Ctrl+Alt+Space 唤出会话管家，再按一次收起&#x0a;使用独立数据目录的副本不注册它"/>
+                        <MenuItem x:Name="MenuHotkeyChange" Header="更改全局快捷键…" Click="ChangeHotkey_Click"
+                                  ToolTip="按下你想用的组合键；被别的程序占用时会立刻告诉你"/>
+                        <MenuItem x:Name="MenuTray" Header="关闭窗口时留在托盘" IsCheckable="True" Click="TraySetting_Click"
+                                  ToolTip="关掉窗口后会话管家继续在右下角托盘运行，点图标或按快捷键回来；右键图标可以退出"/>
+                        <MenuItem x:Name="MenuJumpList" Header="任务栏右键列出最近的对话" IsCheckable="True" Click="JumpListSetting_Click"
+                                  ToolTip="右键任务栏上的会话管家（固定到任务栏后不开窗口也行）：置顶和最近的对话点一下就在 Claude / ChatGPT 里打开&#x0a;这份列表由 Windows 保存；关掉后只留「打开 Claude」「打开 ChatGPT」"/>
+                        <Separator/>
+                        <MenuItem x:Name="MenuThemeSystem" Header="外观：跟随 Windows" IsCheckable="True" Tag="System"
+                                  Click="Theme_Click" ToolTip="Windows 设置里「选择你的应用模式」是浅色就用浅色，深色就用深色"/>
+                        <MenuItem x:Name="MenuThemeDark" Header="外观：深色" IsCheckable="True" Tag="Dark" Click="Theme_Click"/>
+                        <MenuItem x:Name="MenuThemeLight" Header="外观：浅色" IsCheckable="True" Tag="Light" Click="Theme_Click"/>
+                        <Separator/>
+                        <MenuItem x:Name="MenuContentSearch" Header="搜索对话内容" IsCheckable="True" Click="ContentSearchSetting_Click"
+                                  ToolTip="在本机为你和助手说过的话建一个索引，搜索框就能搜到对话内容&#x0a;关闭时索引会删除，标题、目录、ID、名字和备注的搜索照常"/>
+                        <MenuItem x:Name="MenuRebuildIndex" Header="清除并重建内容索引…" Click="RebuildIndex_Click"
+                                  ToolTip="删除本机的对话内容索引并马上重新建立（约半分钟）&#x0a;只在搜不到明明说过的话时需要"/>
+                        <MenuItem x:Name="MenuRememberSearches" Header="记住搜索历史" IsCheckable="True"
+                                  Click="RememberSearchesSetting_Click"
+                                  ToolTip="把你搜过的词记在本机数据目录里，点空的搜索框或按 Alt+↓ 就能再选&#x0a;关闭时已记下的会删掉"/>
+                        <MenuItem x:Name="MenuSemanticSearch" Header="按意思搜索（需要向量模型）" IsCheckable="True"
+                                  Click="SemanticSearchSetting_Click"
+                                  ToolTip="用你放在本机的向量模型，按意思找对话：不必记得原话&#x0a;在后台慢慢建立语义索引，不联网，也不会自动下载模型；关闭时索引会删除"/>
+                        <MenuItem x:Name="MenuSemanticFind" Header="按意思找…" InputGestureText="Ctrl+Shift+F" IsEnabled="False"
+                                  Click="SemanticFind_Click" ToolTip="输入一句话，找意思相近的对话&#x0a;Ctrl+Shift+F 没反应时，多半是被中文输入法的简繁切换占了，从这里打开就行">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE721;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem x:Name="MenuSemanticPause" Header="暂停建立语义索引" Visibility="Collapsed"
+                                  Click="SemanticPause_Click"
+                                  ToolTip="停下正在后台建立的语义索引；已建好的部分照样能搜，之后可以接着建"/>
+                        <Separator/>
+                        <MenuItem Header="键盘快捷键" Click="Shortcuts_Click" InputGestureText="F1">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE765;"/></MenuItem.Icon>
+                        </MenuItem>
+                        <MenuItem Header="关于会话管家" Click="About_Click">
+                            <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE946;"/></MenuItem.Icon>
+                        </MenuItem>
+                    </ContextMenu>
+                </Button.ContextMenu>
+            </Button>
+        </Grid>
+
+        <!-- ===================================================== filter bar -->
+        <DockPanel Grid.Row="1" Margin="0,0,0,10" LastChildFill="True">
+            <Border DockPanel.Dock="Left" Background="{StaticResource RaisedBrush}" CornerRadius="6" Padding="3"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="ActiveTab" Style="{StaticResource SegmentButton}" GroupName="View" IsChecked="True"
+                                 Checked="ViewTab_Checked" ToolTip="日常使用的列表（Ctrl+1）">
+                        <TextBlock>
+                            <Run Text="活跃"/><Run x:Name="ActiveCountRun" Text="" Foreground="{StaticResource FaintBrush}"/>
+                        </TextBlock>
+                    </RadioButton>
+                    <RadioButton x:Name="ArchivedTab" Style="{StaticResource SegmentButton}" GroupName="View"
+                                 Checked="ViewTab_Checked"
+                                 ToolTip="本工具自己的归档：收起的会话在这里，Claude / ChatGPT 侧不受影响（Ctrl+2）">
+                        <TextBlock>
+                            <Run Text="本工具归档"/><Run x:Name="ArchivedCountRun" Text="" Foreground="{StaticResource FaintBrush}"/>
+                        </TextBlock>
+                    </RadioButton>
+                </StackPanel>
+            </Border>
+
+            <ComboBox x:Name="BackendFilterBox" DockPanel.Dock="Left" Style="{StaticResource DarkComboBox}"
+                      Width="138" Margin="16,0,0,0" DisplayMemberPath="Display" AutomationProperties.Name="按应用筛选"
+                      SelectionChanged="BackendFilter_SelectionChanged"
+                      ToolTip="只看某一个应用的会话"/>
+            <ComboBox x:Name="GroupFilterBox" DockPanel.Dock="Left" Style="{StaticResource DarkComboBox}"
+                      Width="186" Margin="8,0,0,0" DisplayMemberPath="Display" AutomationProperties.Name="按分组筛选"
+                      SelectionChanged="GroupFilter_SelectionChanged"
+                      ToolTip="只显示某个分组。「未分组」是还没整理过的会话"/>
+            <ComboBox x:Name="TimeFilterBox" DockPanel.Dock="Left" Style="{StaticResource DarkComboBox}"
+                      Width="112" Margin="8,0,0,0" DisplayMemberPath="Display" AutomationProperties.Name="时间范围"
+                      SelectionChanged="TimeFilter_SelectionChanged"
+                      ToolTip="只看最近一段时间里有过活动的会话。按最后活动排序时，列表还会分成今天、昨天、7 天内……"/>
+            <TextBlock DockPanel.Dock="Left" Text="排序" Style="{StaticResource Muted}" VerticalAlignment="Center"
+                       Margin="16,0,7,0"/>
+            <ComboBox x:Name="SortBox" DockPanel.Dock="Left" Style="{StaticResource DarkComboBox}"
+                      Width="116" DisplayMemberPath="Display" AutomationProperties.Name="排序方式"
+                      SelectionChanged="SortBox_SelectionChanged"
+                      ToolTip="列表按什么排序；直接点列标题也可以。按分组、来源、工作目录或应用内状态排序时会分段显示"/>
+            <Button x:Name="SortDirectionButton" DockPanel.Dock="Left" Style="{StaticResource IconButton}"
+                    Width="30" Height="30" Margin="3,0,0,0" FontSize="13" Click="SortDirection_Click"
+                    AutomationProperties.Name="反转排序方向"/>
+
+            <TextBlock x:Name="InstallationLine" Style="{StaticResource Muted}" VerticalAlignment="Center"
+                       HorizontalAlignment="Right" TextTrimming="CharacterEllipsis" Margin="16,0,2,0">
+                <Run x:Name="InstallationRun" Text="正在探测 Claude 与 ChatGPT…"/><Run Text="　·　"/><Hyperlink
+                    Click="OpenDataRoot_Click" ToolTip="本工具写入的一切都在这个目录里（目录、导出、草稿）。点击打开"><Run
+                    x:Name="DataRootRun"/></Hyperlink>
+            </TextBlock>
+        </DockPanel>
+
+        <!-- ======================================================= content -->
+        <Grid Grid.Row="2">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="12"/>
+                <ColumnDefinition x:Name="SidePanelColumn" Width="348"/>
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <Border Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                    <Grid>
+                        <!-- Virtualised so a 10,000-row catalog never realises every row. -->
+                        <ListView x:Name="SessionList"
+                                  Background="Transparent" BorderThickness="0" Foreground="{StaticResource TextBrush}"
+                                  ItemContainerStyle="{StaticResource ListRow}"
+                                  VirtualizingPanel.IsVirtualizing="True"
+                                  VirtualizingPanel.VirtualizationMode="Recycling"
+                                  VirtualizingPanel.IsVirtualizingWhenGrouping="True"
+                                  ScrollViewer.CanContentScroll="True"
+                                  ScrollViewer.HorizontalScrollBarVisibility="Auto"
+                                  ScrollViewer.PanningMode="VerticalFirst"
+                                  IsTextSearchEnabled="False"
+                                  SelectionMode="Extended"
+                                  AutomationProperties.Name="会话列表"
+                                  SelectionChanged="SessionList_SelectionChanged"
+                                  MouseDoubleClick="SessionList_MouseDoubleClick"
+                                  PreviewMouseRightButtonDown="SessionList_PreviewMouseRightButtonDown"
+                                  PreviewKeyDown="SessionList_PreviewKeyDown"
+                                  PreviewTextInput="SessionList_PreviewTextInput"
+                                  ContextMenuOpening="SessionList_ContextMenuOpening"
+                                  SizeChanged="SessionList_SizeChanged">
+                            <ListView.ContextMenu>
+                                <ContextMenu>
+                                    <MenuItem x:Name="MenuView" Header="查看对话记录" InputGestureText="Enter" Click="ViewTranscript_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8BD;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuCompare" Header="并排对比…" InputGestureText="Ctrl+D" Click="Compare_Click"
+                                              ToolTipService.ShowOnDisabled="True"
+                                              ToolTip="选中两条会话（按住 Ctrl 点选）后并排看：提问对齐，各自的回答、时间、token 与改动的文件">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8AB;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuOpenInApp" Header="在 Claude 中打开此会话" InputGestureText="Ctrl+O" Click="OpenInApp_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8A7;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuResume" Header="用 claude --resume 继续" Click="Resume_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE756;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator/>
+                                    <MenuItem x:Name="MenuCopyTitle" Header="复制标题" InputGestureText="Ctrl+C" Click="CopyTitle_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8C8;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuCopyId" Header="复制会话 ID" Click="CopyId_Click"/>
+                                    <MenuItem x:Name="MenuCopyPath" Header="复制工作目录" Click="CopyPath_Click"/>
+                                    <MenuItem x:Name="MenuOpenFolder" Header="打开工作目录" Click="OpenProjectFolder_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE838;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuReveal" Header="在文件夹中显示记录文件" Click="RevealTranscript_Click"/>
+                                    <Separator/>
+                                    <MenuItem x:Name="MenuPin" Header="置顶" Click="Pin_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE718;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuFavorite" Header="收藏" InputGestureText="Ctrl+S" Click="Favorite_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE734;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuRename" Header="重命名（只在本工具里）…" InputGestureText="F2" Click="Rename_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8AC;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuNote" Header="备注…" Click="Note_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE70B;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator/>
+                                    <MenuItem x:Name="MenuAssign" Header="设为分组…" InputGestureText="Ctrl+G" Click="AssignGroup_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8EC;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuClearGroup" Header="移出分组" Click="ClearGroup_Click"/>
+                                    <MenuItem x:Name="MenuArchive" Header="收起到本工具归档" InputGestureText="Delete" Click="ToggleArchive_Click">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE7B8;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <MenuItem x:Name="MenuDelete" Header="从会话管家删除…" Click="Delete_Click"
+                                              ToolTip="删掉会话管家里的这一行和它的副本，以后不再列出；应用自己的记录不受影响">
+                                        <MenuItem.Icon><TextBlock Style="{StaticResource IconGlyph}" Text="&#xE74D;"/></MenuItem.Icon>
+                                    </MenuItem>
+                                    <Separator/>
+                                    <MenuItem x:Name="MenuDraft" Header="生成记忆候选草稿" Click="MemoryDraft_Click"/>
+                                    <MenuItem x:Name="MenuAnalyze" Header="分析这条会话…" Click="Analyze_Click"
+                                              ToolTipService.ShowOnDisabled="True"/>
+                                </ContextMenu>
+                            </ListView.ContextMenu>
+                            <!-- One heading per category when the list is sorted by one: the name, and how
+                                 many conversations the whole view has in it (not just the loaded pages). -->
+                            <ListView.GroupStyle>
+                                <GroupStyle>
+                                    <!-- The stock container indents its rows by 5 px, which pushes every cell
+                                         out of line with its column header and adds a horizontal scroll bar.
+                                         Same parts, same names (virtualisation looks for them), no indent. -->
+                                    <GroupStyle.ContainerStyle>
+                                        <Style TargetType="GroupItem">
+                                            <Setter Property="Template">
+                                                <Setter.Value>
+                                                    <ControlTemplate TargetType="GroupItem">
+                                                        <StackPanel>
+                                                            <ContentPresenter x:Name="PART_Header"
+                                                                              Content="{TemplateBinding Content}"
+                                                                              ContentTemplate="{TemplateBinding ContentTemplate}"/>
+                                                            <ItemsPresenter x:Name="ItemsPresenter"/>
+                                                        </StackPanel>
+                                                    </ControlTemplate>
+                                                </Setter.Value>
+                                            </Setter>
+                                        </Style>
+                                    </GroupStyle.ContainerStyle>
+                                    <GroupStyle.HeaderTemplate>
+                                        <DataTemplate>
+                                            <!-- As wide as the visible list, not as wide as a long path:
+                                                 otherwise one heading adds a horizontal scroll bar. -->
+                                            <Border Background="{StaticResource SectionBrush}" BorderBrush="{StaticResource LineBrush}"
+                                                    BorderThickness="0,0,0,1" Padding="12,6,12,5" Margin="0,6,0,1"
+                                                    HorizontalAlignment="Left"
+                                                    Width="{Binding ViewportWidth, RelativeSource={RelativeSource AncestorType=ScrollViewer}}"
+                                                    ToolTip="{Binding Name.Tooltip}">
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Right" Text="{Binding Name.CountText}"
+                                                               Foreground="{StaticResource FaintBrush}" FontSize="12" Margin="14,0,0,0"
+                                                               VerticalAlignment="Center"/>
+                                                    <TextBlock Text="{Binding Name.Label}" Foreground="{StaticResource InfoBrush}"
+                                                               FontWeight="SemiBold" FontSize="12.5" TextTrimming="CharacterEllipsis"
+                                                               VerticalAlignment="Center"/>
+                                                </DockPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </GroupStyle.HeaderTemplate>
+                                </GroupStyle>
+                            </ListView.GroupStyle>
+                            <ListView.View>
+                                <GridView ColumnHeaderContainerStyle="{StaticResource ListHeader}">
+                                    <GridViewColumn x:Name="TitleColumn" Width="320">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <DockPanel>
+                                                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="11"
+                                                               Text="&#xE718;" Foreground="{StaticResource InfoBrush}" Margin="0,0,5,0"
+                                                               ToolTip="已置顶（只在本工具里）"
+                                                               Visibility="{Binding IsPinned, Converter={StaticResource BoolToVis}}"/>
+                                                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="11"
+                                                               Text="&#xE735;" Foreground="{StaticResource WarnBrush}" Margin="0,0,5,0"
+                                                               ToolTip="已收藏（只在本工具里）"
+                                                               Visibility="{Binding IsFavorite, Converter={StaticResource BoolToVis}}"/>
+                                                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="11"
+                                                               Text="&#xE7BA;" Foreground="{StaticResource WarnBrush}" Margin="0,0,5,0"
+                                                               ToolTip="{Binding CoverageWarning}"
+                                                               Visibility="{Binding HasCoverageWarning, Converter={StaticResource BoolToVis}}"/>
+                                                    <TextBlock DockPanel.Dock="Right" Style="{StaticResource IconGlyph}" FontSize="11"
+                                                               Text="&#xE70B;" Foreground="{StaticResource FaintBrush}" Margin="6,0,0,0"
+                                                               ToolTip="{Binding Note}"
+                                                               Visibility="{Binding HasNote, Converter={StaticResource BoolToVis}}"/>
+                                                    <Border DockPanel.Dock="Right" Margin="6,0,0,0" Padding="4,0,4,1" CornerRadius="3"
+                                                            VerticalAlignment="Center" BorderThickness="1"
+                                                            BorderBrush="{StaticResource InfoBrush}" ToolTip="{Binding ContentTagTooltip}"
+                                                            Visibility="{Binding MatchedByContent, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="{Binding ContentTag}" FontSize="10.5" Foreground="{StaticResource InfoBrush}"/>
+                                                    </Border>
+                                                    <Border DockPanel.Dock="Right" Margin="6,0,0,0" Padding="4,0,4,1" CornerRadius="3"
+                                                            VerticalAlignment="Center" BorderThickness="1"
+                                                            BorderBrush="{StaticResource LineBrush}" ToolTip="{Binding ContinuationTagTooltip}"
+                                                            Visibility="{Binding ShowsContinuationTag, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="{Binding ContinuationTag}" FontSize="10.5" Foreground="{StaticResource SubtleTextBrush}"/>
+                                                    </Border>
+                                                    <Border DockPanel.Dock="Right" Margin="6,0,0,0" Padding="4,0,4,1" CornerRadius="3"
+                                                            VerticalAlignment="Center" BorderThickness="1"
+                                                            BorderBrush="{StaticResource LineBrush}" ToolTip="{Binding GoneTooltip}"
+                                                            Visibility="{Binding IsSourceGone, Converter={StaticResource BoolToVis}}">
+                                                        <TextBlock Text="原记录已删" FontSize="10.5" Foreground="{StaticResource MutedBrush}"/>
+                                                    </Border>
+                                                    <TextBlock Text="{Binding Title}" TextTrimming="CharacterEllipsis"
+                                                               ToolTip="{Binding Title}" local:TrimmedToolTip.IsEnabled="True"/>
+                                                </DockPanel>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <!-- Templated rather than a plain binding: the colour says whether the
+                                         group is the user's own or one the app assigned. -->
+                                    <GridViewColumn x:Name="GroupColumn" Width="112">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding GroupDisplay}" Foreground="{Binding GroupBrush}"
+                                                           ToolTip="{Binding GroupTooltip}" TextTrimming="CharacterEllipsis"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn x:Name="SourceColumn" Width="104">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding Backend}" Foreground="{Binding BackendBrush}"
+                                                           ToolTip="{Binding AppName}" TextTrimming="CharacterEllipsis"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn x:Name="ProjectColumn" Width="170">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <local:CompactPathText Path="{Binding ProjectRef}" Foreground="{StaticResource MutedBrush}"
+                                                                       ToolTip="{Binding ProjectFull}"
+                                                                       AutomationProperties.Name="{Binding ProjectFull}"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn x:Name="TimeColumn" Width="104">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding LastActivity}" ToolTip="{Binding LastActivityFull}"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn x:Name="SizeColumn" Width="80">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding SizeText}" Foreground="{StaticResource MutedBrush}"
+                                                           ToolTip="{Binding SizeFull}" TextAlignment="Right" Margin="0,0,6,0"
+                                                           TextTrimming="CharacterEllipsis"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                    <GridViewColumn x:Name="StateColumn" Width="68">
+                                        <GridViewColumn.CellTemplate>
+                                            <DataTemplate>
+                                                <TextBlock Text="{Binding AppState}" Foreground="{StaticResource MutedBrush}"
+                                                           ToolTip="{Binding AppStateTooltip}" TextTrimming="CharacterEllipsis"/>
+                                            </DataTemplate>
+                                        </GridViewColumn.CellTemplate>
+                                    </GridViewColumn>
+                                </GridView>
+                            </ListView.View>
+                        </ListView>
+
+                        <!-- Instead of a blank list: why it is empty and the one step that fills it. -->
+                        <StackPanel x:Name="EmptyPanel" VerticalAlignment="Center" HorizontalAlignment="Center"
+                                    MaxWidth="440" Margin="24" Visibility="Collapsed">
+                            <TextBlock x:Name="EmptyTitle" FontSize="15" FontWeight="SemiBold" TextAlignment="Center"
+                                       TextWrapping="Wrap"/>
+                            <TextBlock x:Name="EmptyDetail" Style="{StaticResource Muted}" FontSize="12.5" TextAlignment="Center"
+                                       TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="20"/>
+                            <Button x:Name="EmptyActionButton" HorizontalAlignment="Center" Margin="0,16,0,0"
+                                    Click="EmptyAction_Click"/>
+                        </StackPanel>
+                    </Grid>
+                </Border>
+
+                <DockPanel Grid.Row="1" Margin="2,6,0,0">
+                    <Button x:Name="LoadMoreButton" DockPanel.Dock="Right" Style="{StaticResource GhostButton}"
+                            Content="加载更多" Click="LoadMore_Click" Visibility="Collapsed"/>
+                    <TextBlock x:Name="ListSummary" Style="{StaticResource Muted}" VerticalAlignment="Center"
+                               TextTrimming="CharacterEllipsis"/>
+                </DockPanel>
+            </Grid>
+
+            <!-- =================================================== side panel -->
+            <DockPanel Grid.Column="2">
+                <!-- The coverage report is an audit, not a daily view: one line that says whether
+                     anything needs a look, the full report one click away. -->
+                <Border DockPanel.Dock="Bottom" Style="{StaticResource Card}" Padding="10,6" Margin="0,10,0,0">
+                    <Expander x:Name="CoverageExpander" AutomationProperties.Name="来源覆盖报告" Expanded="CoverageExpander_Changed" Collapsed="CoverageExpander_Changed">
+                        <Expander.Header>
+                            <DockPanel>
+                                <TextBlock Text="来源覆盖" Foreground="{StaticResource TextBrush}" FontWeight="SemiBold"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock x:Name="CoverageSummaryText" Margin="10,0,0,0" FontSize="12"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            </DockPanel>
+                        </Expander.Header>
+                        <ScrollViewer x:Name="CoverageScroll" MaxHeight="300" Margin="0,8,0,2"
+                                      VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                            <ItemsControl x:Name="CoverageList">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <StackPanel Margin="0,0,4,8">
+                                            <TextBlock Text="{Binding Headline}" Foreground="{Binding HeadlineBrush}"
+                                                       FontSize="12" FontWeight="SemiBold" TextWrapping="Wrap"/>
+                                            <TextBlock Text="{Binding Detail}" Foreground="{StaticResource MutedBrush}" FontSize="12"
+                                                       TextWrapping="Wrap" Margin="0,2,0,0"
+                                                       Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}"/>
+                                        </StackPanel>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                        </ScrollViewer>
+                    </Expander>
+                </Border>
+
+                <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled"
+                              PanningMode="VerticalOnly">
+                    <StackPanel>
+                        <!-- What is selected, in full: the list can only show a line of it. -->
+                        <Border Style="{StaticResource Card}">
+                            <Grid>
+                                <StackPanel x:Name="DetailNone">
+                                    <TextBlock Text="未选择会话" FontWeight="SemiBold" FontSize="14"/>
+                                    <TextBlock Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="0,8,0,0" LineHeight="19"
+                                               Text="单击一行查看详情，双击或按 Enter 打开对话记录。按住 Ctrl 或 Shift 可以多选，再批量设为分组或收起。直接打字即可搜索。"/>
+                                </StackPanel>
+
+                                <StackPanel x:Name="DetailOne" Visibility="Collapsed">
+                                    <TextBox Style="{StaticResource SelectableText}" Text="{Binding Title, Mode=OneWay}"
+                                             FontSize="14.5" FontWeight="SemiBold" AutomationProperties.Name="会话标题"/>
+                                    <TextBlock Text="{Binding OriginalTitleLine}" Foreground="{StaticResource FaintBrush}" FontSize="12"
+                                               Margin="0,3,0,0" TextWrapping="Wrap"
+                                               Visibility="{Binding HasLocalTitle, Converter={StaticResource BoolToVis}}"/>
+                                    <Border Margin="0,8,0,0" Padding="9,6" CornerRadius="3" Background="{StaticResource RaisedBrush}"
+                                            Visibility="{Binding HasNote, Converter={StaticResource BoolToVis}}">
+                                        <DockPanel>
+                                            <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="12"
+                                                       Text="&#xE70B;" Foreground="{StaticResource FaintBrush}" Margin="0,2,7,0"
+                                                       VerticalAlignment="Top"/>
+                                            <TextBlock Text="{Binding Note}" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource SubtleTextBrush}"/>
+                                        </DockPanel>
+                                    </Border>
+                                    <WrapPanel Margin="0,8,0,0">
+                                        <Border CornerRadius="3" Padding="7,1,7,2" Background="{Binding BackendFill}" Margin="0,0,8,0">
+                                            <TextBlock Text="{Binding Backend}" FontSize="12" Foreground="White"/>
+                                        </Border>
+                                        <TextBlock Text="{Binding AppStateLong}" Style="{StaticResource Muted}" VerticalAlignment="Center"
+                                                   TextWrapping="Wrap"/>
+                                    </WrapPanel>
+
+                                    <Grid Margin="0,12,0,0">
+                                        <Grid.ColumnDefinitions>
+                                            <ColumnDefinition Width="Auto"/>
+                                            <ColumnDefinition Width="*"/>
+                                        </Grid.ColumnDefinitions>
+                                        <Grid.RowDefinitions>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                            <RowDefinition Height="Auto"/>
+                                        </Grid.RowDefinitions>
+
+                                        <!-- Label, value and its actions on one line each: the card stays short
+                                             enough that 最近对话 below the actions is on screen too. -->
+                                        <TextBlock Text="工作目录" Style="{StaticResource DetailLabel}"/>
+                                        <DockPanel Grid.Column="1" Margin="0,0,0,8">
+                                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="10,0,0,0"
+                                                        VerticalAlignment="Top"
+                                                        Visibility="{Binding HasProject, Converter={StaticResource BoolToVis}}">
+                                                <Button Style="{StaticResource LinkButton}" Content="打开" Click="OpenProjectFolder_Click"
+                                                        IsEnabled="{Binding ProjectLooksOpenable}" Margin="0,0,10,0"/>
+                                                <Button Style="{StaticResource LinkButton}" Content="复制" Click="CopyPath_Click"/>
+                                            </StackPanel>
+                                            <TextBox Style="{StaticResource SelectableText}" Text="{Binding ProjectFull, Mode=OneWay}"
+                                                     FontSize="12" Foreground="{StaticResource SubtleTextBrush}"/>
+                                        </DockPanel>
+
+                                        <TextBlock Grid.Row="1" Text="最后活动" Style="{StaticResource DetailLabel}"/>
+                                        <TextBlock Grid.Row="1" Grid.Column="1" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8">
+                                            <Run Text="{Binding LastActivity, Mode=OneWay}"/><Run Text="　"/><Run
+                                                Text="{Binding LastActivityFull, Mode=OneWay}" FontSize="11.5"
+                                                Foreground="{StaticResource FaintBrush}"/>
+                                        </TextBlock>
+
+                                        <TextBlock Grid.Row="2" Text="分组" Style="{StaticResource DetailLabel}"/>
+                                        <TextBlock Grid.Row="2" Grid.Column="1" FontSize="12" TextWrapping="Wrap" Margin="0,0,0,8">
+                                            <Run Text="{Binding GroupDisplay, Mode=OneWay}" Foreground="{Binding GroupBrush, Mode=OneWay}"/><Run
+                                                Text="　"/><Run Text="{Binding GroupSource, Mode=OneWay}" Foreground="{StaticResource FaintBrush}"/>
+                                        </TextBlock>
+
+                                        <TextBlock Grid.Row="3" Text="记录文件" Style="{StaticResource DetailLabel}"/>
+                                        <DockPanel Grid.Row="3" Grid.Column="1" Margin="0,0,0,8">
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="在文件夹中显示"
+                                                    Click="RevealTranscript_Click" Margin="10,0,0,0" VerticalAlignment="Top"
+                                                    Visibility="{Binding HasTranscriptFile, Converter={StaticResource BoolToVis}}"
+                                                    ToolTip="在资源管理器中选中这条会话的记录文件（只读，不移动不删除）"/>
+                                            <TextBlock Text="{Binding SizeDetail}" ToolTip="{Binding SizeFull}" FontSize="12" Foreground="{StaticResource SubtleTextBrush}"
+                                                       TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                        </DockPanel>
+
+                                        <!-- A conversation Claude continued across transcripts: its other parts,
+                                             each one click from being read or found in the list. -->
+                                        <TextBlock x:Name="ContinuationLabel" Grid.Row="4" Text="续接" Style="{StaticResource DetailLabel}"
+                                                   Visibility="Collapsed"/>
+                                        <ItemsControl x:Name="ContinuationList" Grid.Row="4" Grid.Column="1" Margin="0,0,0,5"
+                                                      Visibility="Collapsed" AutomationProperties.Name="续接的其他部分" Focusable="False">
+                                            <ItemsControl.ItemTemplate>
+                                                <DataTemplate>
+                                                    <DockPanel Margin="0,0,0,3">
+                                                        <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" Margin="10,0,0,0"
+                                                                    VerticalAlignment="Top"
+                                                                    Visibility="{Binding HasRow, Converter={StaticResource BoolToVis}}">
+                                                            <Button Style="{StaticResource LinkButton}" Content="查看" Click="ContinuationOpen_Click"
+                                                                    Margin="0,0,10,0" ToolTip="打开这一段的对话记录"
+                                                                    AutomationProperties.Name="{Binding OpenName}"/>
+                                                            <Button Style="{StaticResource LinkButton}" Content="定位" Click="ContinuationLocate_Click"
+                                                                    ToolTip="在列表里选中它（会清除搜索和筛选）"
+                                                                    AutomationProperties.Name="{Binding LocateName}"/>
+                                                        </StackPanel>
+                                                        <!-- Two pieces that wrap whole: when the line is too narrow the
+                                                             time and size move down together, never split mid-word. -->
+                                                        <WrapPanel ToolTip="{Binding Tooltip}">
+                                                            <TextBlock Text="{Binding Label}" FontSize="12" Margin="0,0,8,0"
+                                                                       Foreground="{StaticResource SubtleTextBrush}"/>
+                                                            <TextBlock Text="{Binding Detail}" FontSize="11.5" VerticalAlignment="Center"
+                                                                       Foreground="{StaticResource FaintBrush}"/>
+                                                        </WrapPanel>
+                                                    </DockPanel>
+                                                </DataTemplate>
+                                            </ItemsControl.ItemTemplate>
+                                        </ItemsControl>
+
+                                        <!-- Shown once the usage ledger exists (the usage window was opened once). -->
+                                        <TextBlock x:Name="UsageLabel" Grid.Row="5" Text="用量" Style="{StaticResource DetailLabel}"
+                                                   Visibility="Collapsed"/>
+                                        <DockPanel x:Name="UsageLine" Grid.Row="5" Grid.Column="1" Margin="0,0,0,8" Visibility="Collapsed">
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="用量统计"
+                                                    Click="Usage_Click" Margin="10,0,0,0" VerticalAlignment="Top"
+                                                    ToolTip="按天、模型、工作目录看全部用量"/>
+                                            <TextBlock x:Name="UsageValue" FontSize="12" Foreground="{StaticResource SubtleTextBrush}"
+                                                       TextWrapping="Wrap" VerticalAlignment="Center"/>
+                                        </DockPanel>
+
+                                        <TextBlock Grid.Row="6" Text="会话 ID" Style="{StaticResource DetailLabel}"/>
+                                        <DockPanel Grid.Row="6" Grid.Column="1">
+                                            <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" Content="复制"
+                                                    Click="CopyId_Click" Margin="10,0,0,0" VerticalAlignment="Top"
+                                                    AutomationProperties.Name="复制会话 ID"/>
+                                            <TextBlock Text="{Binding SessionId}" FontFamily="{StaticResource MonoFont}" FontSize="11.5"
+                                                       Foreground="{StaticResource SubtleTextBrush}" TextTrimming="CharacterEllipsis"
+                                                       ToolTip="{Binding SessionId}" VerticalAlignment="Center"/>
+                                        </DockPanel>
+                                    </Grid>
+
+                                    <WrapPanel Margin="0,10,0,0">
+                                        <Button Style="{StaticResource LinkButton}" Content="重命名…" Click="Rename_Click" Margin="0,0,14,4"
+                                                ToolTip="给它起一个自己的名字：只在本工具里显示，应用里的标题不变（F2）"/>
+                                        <Button Style="{StaticResource LinkButton}" Content="{Binding PinLabel}" Click="Pin_Click" Margin="0,0,14,4"
+                                                ToolTip="置顶的会话无论怎么排序都在最前；只在本工具里"/>
+                                        <Button Style="{StaticResource LinkButton}" Content="{Binding FavoriteLabel}" Click="Favorite_Click" Margin="0,0,14,4"
+                                                ToolTip="收藏的会话不改变排序；在分组筛选里选「★ 收藏」就只看它们。只在本工具里（Ctrl+S）"/>
+                                        <Button Style="{StaticResource LinkButton}" Content="备注…" Click="Note_Click" Margin="0,0,14,4"
+                                                ToolTip="写几句自己的备注：进展、下一步……搜索也能找到它"/>
+                                        <Button Style="{StaticResource LinkButton}" Content="改动的文件…" Click="Changes_Click" Margin="0,0,14,4"
+                                                ToolTip="这条会话用 Edit、Write、apply_patch 改过哪些文件，每次改了什么（读自对话记录）"/>
+                                        <Button Style="{StaticResource LinkButton}" Content="分析这条会话…" Click="Analyze_Click" Margin="0,0,14,4"
+                                                IsEnabled="{Binding Source.CountsTokens}" ToolTipService.ShowOnDisabled="True"
+                                                ToolTip="每次调用的上下文有多大、缓存过期后重写了几次、压缩了几次、哪些工具占得最多（读自对话记录；网页版的数据导出没有 token 记录，分析不了）"/>
+                                        <Button Style="{StaticResource LinkButton}" Content="生成记忆候选草稿…" Click="MemoryDraft_Click" Margin="0,0,0,4"
+                                                ToolTip="从你自己在这条会话里的发言中，原样摘录可能值得记住的句子，写成草稿供你挑选；不写入任何记忆目录"/>
+                                    </WrapPanel>
+                                    <DockPanel Margin="0,10,0,0" Visibility="{Binding HasCoverageWarning, Converter={StaticResource BoolToVis}}">
+                                        <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="12" Text="&#xE7BA;"
+                                                   Foreground="{StaticResource WarnBrush}" Margin="0,1,6,0" VerticalAlignment="Top"/>
+                                        <TextBlock Text="{Binding CoverageWarning}" Foreground="{StaticResource WarnBrush}"
+                                                   FontSize="12" TextWrapping="Wrap"/>
+                                    </DockPanel>
+                                </StackPanel>
+
+                                <StackPanel x:Name="DetailMany" Visibility="Collapsed">
+                                    <TextBlock x:Name="ManyTitle" FontWeight="SemiBold" FontSize="14"/>
+                                    <TextBlock x:Name="ManyDetail" Style="{StaticResource Muted}" TextWrapping="Wrap"
+                                               Margin="0,8,0,0" LineHeight="19"/>
+                                    <Button x:Name="CompareLink" Style="{StaticResource LinkButton}" Content="并排对比这两条" Click="Compare_Click"
+                                            HorizontalAlignment="Left" Margin="0,10,0,0" Visibility="Collapsed"
+                                            ToolTip="把这两条会话并排放在一个窗口里：提问对齐，各自的回答、时间、token 与改动的文件（Ctrl+D）"/>
+                                </StackPanel>
+                            </Grid>
+                        </Border>
+
+                        <!-- Actions for the selection. Each is enabled only when it can act on
+                             what is selected, and says why not when it cannot. -->
+                        <StackPanel Margin="0,12,0,0">
+                            <Button x:Name="ViewTranscriptButton" Style="{StaticResource PrimaryActionButton}" AutomationProperties.Name="查看对话记录"
+                                    Click="ViewTranscript_Click" ToolTip="双击列表中的一行也可以打开">
+                                <DockPanel>
+                                    <TextBlock DockPanel.Dock="Right" Text="Enter" Style="{StaticResource KeyHint}"/>
+                                    <TextBlock Text="查看对话记录"/>
+                                </DockPanel>
+                            </Button>
+                            <Grid Margin="0,0,0,6">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Button x:Name="OpenInAppButton" Style="{StaticResource ActionButton}" Margin="0"
+                                        Click="OpenInApp_Click">
+                                    <TextBlock x:Name="OpenInAppLabel" Text="在应用中打开" TextTrimming="CharacterEllipsis"/>
+                                </Button>
+                                <Button x:Name="ResumeButton" Grid.Column="2" Style="{StaticResource ActionButton}" Margin="0"
+                                        Click="Resume_Click">
+                                    <TextBlock x:Name="ResumeLabel" Text="命令行继续" TextTrimming="CharacterEllipsis"/>
+                                </Button>
+                            </Grid>
+
+                            <TextBlock Text="整理　·　只改本工具的列表，可撤销（Ctrl+Z）" Style="{StaticResource SectionLabel}"/>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*"/>
+                                    <ColumnDefinition Width="6"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <Grid.RowDefinitions>
+                                    <RowDefinition Height="Auto"/>
+                                    <RowDefinition Height="Auto"/>
+                                </Grid.RowDefinitions>
+                                <Button x:Name="AssignGroupButton" Style="{StaticResource ActionButton}" AutomationProperties.Name="设为分组"
+                                        Click="AssignGroup_Click" ToolTip="把选中的会话放进一个分组，可多选（Ctrl+G）">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" Text="Ctrl+G" Style="{StaticResource KeyHint}"/>
+                                        <TextBlock Text="设为分组…"/>
+                                    </DockPanel>
+                                </Button>
+                                <Button x:Name="ClearGroupButton" Grid.Column="2" Style="{StaticResource ActionButton}"
+                                        Click="ClearGroup_Click" Content="移出分组"
+                                        ToolTip="让选中的会话不属于任何分组（包括应用自己的分组）"/>
+                                <Button x:Name="ArchiveButton" Grid.Row="1" Style="{StaticResource ActionButton}"
+                                        Click="ToggleArchive_Click">
+                                    <DockPanel>
+                                        <TextBlock DockPanel.Dock="Right" x:Name="ArchiveKeyHint" Text="Del" Style="{StaticResource KeyHint}"/>
+                                        <TextBlock x:Name="ArchiveLabel" Text="收起到归档" TextTrimming="CharacterEllipsis"/>
+                                    </DockPanel>
+                                </Button>
+                                <Button x:Name="GroupByProjectButton" Grid.Row="1" Grid.Column="2" Style="{StaticResource ActionButton}"
+                                        Click="GroupByProject_Click" Content="按目录自动分组"
+                                        ToolTip="给当前视图里还没有分组的会话，按它的工作目录名建立分组；可撤销"/>
+                            </Grid>
+                        </StackPanel>
+
+                        <!-- The last things said: what tells apart conversations that share a title.
+                             Below the actions, so its changing height never moves a button. -->
+                        <StackPanel x:Name="PreviewSection" Visibility="Collapsed">
+                            <!-- Why a search found this conversation, when its title does not say. -->
+                            <StackPanel x:Name="ContentHitsSection" Visibility="Collapsed" Margin="0,0,0,4">
+                                <DockPanel>
+                                    <Button x:Name="ContentHitsOpenButton" DockPanel.Dock="Right" Style="{StaticResource LinkButton}"
+                                            Content="在记录中查找 →" Click="ContentHitsOpen_Click" VerticalAlignment="Bottom"
+                                            Margin="0,0,0,6" ToolTip="打开对话记录，查找框里填好这个词，并跳到第一处"
+                                            AutomationProperties.Name="在对话记录中查找这个词"/>
+                                    <TextBlock x:Name="ContentHitsLabel" Style="{StaticResource SectionLabel}"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </DockPanel>
+                                <ItemsControl x:Name="ContentHitsList" Focusable="False" AutomationProperties.Name="对话中提到的地方">
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border BorderThickness="2,0,0,0" BorderBrush="{Binding Accent}" Padding="9,1,0,1" Margin="2,0,0,10">
+                                                <StackPanel>
+                                                    <TextBlock FontSize="11.5">
+                                                        <Run Text="{Binding Speaker, Mode=OneWay}" Foreground="{Binding Accent, Mode=OneWay}"
+                                                             FontWeight="SemiBold"/><Run Text="　"/><Run Text="{Binding When, Mode=OneWay}"
+                                                             Foreground="{StaticResource FaintBrush}"/>
+                                                    </TextBlock>
+                                                    <TextBlock local:Highlight.Text="{Binding Text}" local:Highlight.Term="{Binding Term}"
+                                                               TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                                               FontSize="12" LineHeight="18" LineStackingStrategy="BlockLineHeight"
+                                                               MaxHeight="72" Margin="0,3,0,0" Foreground="{StaticResource SubtleTextBrush}"/>
+                                                </StackPanel>
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                            <DockPanel>
+                                <Button x:Name="PreviewOpenButton" DockPanel.Dock="Right" Style="{StaticResource LinkButton}"
+                                        Content="看最新 →" Click="PreviewOpen_Click" VerticalAlignment="Bottom" Margin="0,0,0,6"
+                                        ToolTip="打开对话记录并跳到最新的内容" AutomationProperties.Name="打开对话记录并跳到最新"/>
+                                <TextBlock Text="最近对话" Style="{StaticResource SectionLabel}"/>
+                            </DockPanel>
+                            <ItemsControl x:Name="PreviewList" Focusable="False" AutomationProperties.Name="最近对话">
+                                <ItemsControl.ItemTemplate>
+                                    <DataTemplate>
+                                        <Border BorderThickness="2,0,0,0" BorderBrush="{Binding Accent}" Padding="9,1,0,1" Margin="2,0,0,10">
+                                            <StackPanel>
+                                                <TextBlock FontSize="11.5">
+                                                    <Run Text="{Binding Speaker, Mode=OneWay}" Foreground="{Binding Accent, Mode=OneWay}"
+                                                         FontWeight="SemiBold"/><Run Text="　"/><Run Text="{Binding When, Mode=OneWay}"
+                                                         Foreground="{StaticResource FaintBrush}"/>
+                                                </TextBlock>
+                                                <TextBlock Text="{Binding Text}" TextWrapping="Wrap" TextTrimming="CharacterEllipsis"
+                                                           FontSize="12" LineHeight="18" LineStackingStrategy="BlockLineHeight"
+                                                           MaxHeight="54" Margin="0,3,0,0" Foreground="{StaticResource SubtleTextBrush}"
+                                                           ToolTip="{Binding Text}"/>
+                                            </StackPanel>
+                                        </Border>
+                                    </DataTemplate>
+                                </ItemsControl.ItemTemplate>
+                            </ItemsControl>
+                            <TextBlock x:Name="PreviewNote" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="2,0,0,0"
+                                       Visibility="Collapsed"/>
+                        </StackPanel>
+                    </StackPanel>
+                </ScrollViewer>
+            </DockPanel>
+        </Grid>
+
+        <!-- ===================================================== status bar -->
+        <Border Grid.Row="3" Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}"
+                BorderThickness="1" CornerRadius="4" Padding="10,6" Margin="0,10,0,0">
+            <DockPanel x:Name="StatusBar" SizeChanged="StatusBar_SizeChanged">
+                <TextBlock x:Name="LastSyncText" DockPanel.Dock="Right" Style="{StaticResource Muted}"
+                           VerticalAlignment="Center" Margin="16,0,0,0" SizeChanged="StatusBar_SizeChanged"
+                           ToolTip="切回本窗口时、以及窗口开着时每分钟，会自动在后台检查新会话；有变化才刷新列表。F5 立即同步"/>
+                <!-- An export that turned up in Downloads: its own place, so the status message keeps its link (撤销);
+                     as wide as the message leaves it (FitExportOffer). -->
+                <DockPanel x:Name="ExportOfferPanel" DockPanel.Dock="Right" Visibility="Collapsed" Margin="16,0,0,0" MaxWidth="600">
+                    <TextBlock DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="12" Text="&#xE896;"
+                               Foreground="{StaticResource InfoBrush}" Margin="0,0,6,0"/>
+                    <TextBlock DockPanel.Dock="Right" VerticalAlignment="Center" FontSize="12.5" Margin="8,0,0,0">
+                        <Hyperlink Click="ImportOffer_Click" ToolTip="在后台导入，随时可以取消"><Run Text="导入"/></Hyperlink><Run
+                            Text="　"/><Hyperlink Click="DismissOffer_Click" ToolTip="不再提示这一份；以后仍可从「⋯」菜单导入"><Run Text="忽略"/></Hyperlink>
+                    </TextBlock>
+                    <TextBlock x:Name="ExportOfferText" VerticalAlignment="Center" FontSize="12.5" TextTrimming="CharacterEllipsis"
+                               Foreground="{StaticResource MutedBrush}"
+                               AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="下载文件夹里的导出"/>
+                </DockPanel>
+                <TextBlock x:Name="StatusGlyph" DockPanel.Dock="Left" Style="{StaticResource IconGlyph}" FontSize="12"
+                           Margin="0,0,8,0"/>
+                <!-- The follow-up link sits right after the message it belongs to. -->
+                <TextBlock x:Name="StatusLine" VerticalAlignment="Center" TextTrimming="CharacterEllipsis" FontSize="12.5"
+                           AutomationProperties.LiveSetting="Polite" AutomationProperties.Name="状态">
+                    <Run x:Name="StatusRun"/><Run x:Name="StatusGap" Text="　"/><Hyperlink x:Name="StatusLink"
+                        Click="StatusLink_Click"><Run x:Name="StatusLinkRun"/></Hyperlink>
+                </TextBlock>
+            </DockPanel>
+        </Border>
+
+        <!-- Files dragged over the window: what letting go of them does. Never in the way of the pointer. -->
+        <Grid x:Name="DropOverlay" Grid.RowSpan="4" Visibility="Collapsed" IsHitTestVisible="False">
+            <Border Background="{StaticResource WindowBrush}" Opacity="0.95" CornerRadius="6"/>
+            <Border BorderBrush="{StaticResource FocusBrush}" BorderThickness="2" CornerRadius="6">
+                <StackPanel HorizontalAlignment="Center" VerticalAlignment="Center">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE8B5;" FontSize="32" HorizontalAlignment="Center"
+                               Foreground="{StaticResource FocusBrush}"/>
+                    <TextBlock Text="松开即可导入" FontSize="18" FontWeight="SemiBold" HorizontalAlignment="Center" Margin="0,10,0,4"/>
+                    <TextBlock Style="{StaticResource Muted}" HorizontalAlignment="Center"
+                               Text="ChatGPT、Claude 的数据导出，或含 Gemini 记录的 Google Takeout；在后台导入，随时可以取消"/>
+                </StackPanel>
+            </Border>
+        </Grid>
+    </Grid>
+</Window>

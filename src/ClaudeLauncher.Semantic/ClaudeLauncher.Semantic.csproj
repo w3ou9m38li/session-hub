@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The optional semantic-search component: the embedding model's runtime, loaded only by the
+       semantic worker (the child process) from a "semantic" folder beside the exe. The app itself
+       never references it, so the window and every other process never load ONNX Runtime. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- A component loaded into the host: its dependencies are resolved from its own .deps.json. -->
+    <EnableDynamicLoading>true</EnableDynamicLoading>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- The host already has these: the interfaces must be the host's own types, so neither the
+         assemblies nor their packages' runtime and native files (SQLite's) are copied here. -->
+    <ProjectReference Include="..\ClaudeLauncher.Infrastructure\ClaudeLauncher.Infrastructure.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native</ExcludeAssets>
+    </ProjectReference>
+    <ProjectReference Include="..\ClaudeLauncher.Core\ClaudeLauncher.Core.csproj">
+      <Private>false</Private>
+      <ExcludeAssets>runtime;native</ExcludeAssets>
+    </ProjectReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- CPU inference only. -->
+    <PackageReference Include="Microsoft.ML.OnnxRuntime" Version="1.22.0" />
+  </ItemGroup>
+
+</Project>

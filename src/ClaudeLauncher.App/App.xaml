@@ -1,0 +1,16 @@
+<Application x:Class="ClaudeLauncher.App.App"
+             xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             ShutdownMode="OnMainWindowClose">
+    <!-- Transcript windows are not owned by the main window (they minimise on their own), so
+         closing the main window is what ends the program — readers included — rather than the
+         last window happening to close. -->
+    <Application.Resources>
+        <!-- Templated once for every window, so nothing can fall back to a light stock control. -->
+        <ResourceDictionary>
+            <ResourceDictionary.MergedDictionaries>
+                <ResourceDictionary Source="Themes/Dark.xaml"/>
+            </ResourceDictionary.MergedDictionaries>
+        </ResourceDictionary>
+    </Application.Resources>
+</Application>

@@ -1,0 +1,109 @@
+<Window x:Class="ClaudeLauncher.App.TakeoutImportDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="导入 Gemini 网页版的对话" Width="600" SizeToContent="Height" MinWidth="460"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <StackPanel Margin="20,18,20,16">
+        <TextBlock FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
+                   Text="把 Gemini 网页版的对话导进来"/>
+        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" LineHeight="20" Foreground="{StaticResource SubtleTextBrush}"
+                   Text="网页版（gemini.google.com，以及 Chrome 侧边栏里的 Gemini）的记录存在 Google 那边：先用 Google Takeout 导出一份，再在这里选中下载的压缩包。会话管家只读这份导出，复制到自己的数据目录里，之后能在列表里搜索、查看、导出；以后再导入新的导出，只补上新增的部分。"/>
+
+        <Border Margin="0,14,0,0" Padding="16,12,16,14" CornerRadius="6" BorderThickness="1"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Style="{StaticResource LinkButton}" VerticalAlignment="Center"
+                            Content="打开 takeout.google.com" Click="OpenTakeout_Click"
+                            ToolTip="在浏览器里打开 Google Takeout（需要登录你的 Google 账号）"/>
+                    <TextBlock Text="在 Google Takeout 里导出" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                </DockPanel>
+
+                <Grid Margin="0,10,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="24"/>
+                        <ColumnDefinition/>
+                    </Grid.ColumnDefinitions>
+                    <Grid.RowDefinitions>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                        <RowDefinition/>
+                    </Grid.RowDefinitions>
+                    <Grid.Resources>
+                        <Style x:Key="StepNumber" TargetType="TextBlock">
+                            <Setter Property="Foreground" Value="{StaticResource GeminiTextBrush}"/>
+                            <Setter Property="FontWeight" Value="SemiBold"/>
+                            <Setter Property="Margin" Value="0,0,0,8"/>
+                        </Style>
+                        <Style x:Key="StepText" TargetType="TextBlock">
+                            <Setter Property="TextWrapping" Value="Wrap"/>
+                            <Setter Property="LineHeight" Value="20"/>
+                            <Setter Property="Margin" Value="0,0,0,8"/>
+                        </Style>
+                        <Style x:Key="StepNote" TargetType="Run">
+                            <Setter Property="Foreground" Value="{StaticResource MutedBrush}"/>
+                        </Style>
+                    </Grid.Resources>
+
+                    <TextBlock Grid.Row="0" Style="{StaticResource StepNumber}" Text="1"/>
+                    <TextBlock Grid.Row="0" Grid.Column="1" Style="{StaticResource StepText}">
+                        先点 <Bold>Deselect all</Bold>（取消全选），列表按英文字母排，往下翻到 <Bold>My Activity</Bold>（我的活动）勾上。<LineBreak/>
+                        <Run Style="{StaticResource StepNote}">不要勾单独的 Gemini：那一项导出的是你建的 Gem，不是聊天记录。</Run>
+                    </TextBlock>
+
+                    <TextBlock Grid.Row="1" Style="{StaticResource StepNumber}" Text="2"/>
+                    <TextBlock Grid.Row="1" Grid.Column="1" Style="{StaticResource StepText}">
+                        在 My Activity 下面点 <Bold>Multiple formats</Bold>（多种格式），把 Activity records 从 HTML 改成 <Bold>JSON</Bold>，点 OK。<LineBreak/>
+                        <Run x:Name="FormatNote" Style="{StaticResource StepNote}">不改、保持 HTML 也能导入；JSON 版更完整（HTML 版里有的附件不写文件名）。</Run>
+                    </TextBlock>
+
+                    <TextBlock Grid.Row="2" Style="{StaticResource StepNumber}" Text="3"/>
+                    <TextBlock Grid.Row="2" Grid.Column="1" Style="{StaticResource StepText}">
+                        再点旁边的 <Bold>All activity data included</Bold>（包含所有活动数据），弹窗里先点 <Bold>Deselect all</Bold>，只勾 <Bold>Gemini Apps</Bold>，点 OK。<LineBreak/>
+                        <Run Style="{StaticResource StepNote}">弹窗里没有 Gemini Apps：说明「Gemini 应用活动记录」没开，导不出聊天记录。</Run>
+                    </TextBlock>
+
+                    <TextBlock Grid.Row="3" Style="{StaticResource StepNumber}" Text="4"/>
+                    <TextBlock Grid.Row="3" Grid.Column="1" Style="{StaticResource StepText}">
+                        翻到页面最底部点 <Bold>Next step</Bold>：Destination 选 <Bold>Send download link via email</Bold>，
+                        Frequency 选 <Bold>Export once</Bold>，File type 选 <Bold>.zip</Bold>（大小保持默认），点 <Bold>Create export</Bold>。
+                    </TextBlock>
+
+                    <TextBlock Grid.Row="4" Style="{StaticResource StepNumber}" Text="5" Margin="0"/>
+                    <TextBlock Grid.Row="4" Grid.Column="1" Style="{StaticResource StepText}" Margin="0">
+                        导出好了 Google 会发邮件（几分钟到几小时）。下载压缩包，不用解压，回到这里点「选择导出文件…」。
+                    </TextBlock>
+                </Grid>
+            </StackPanel>
+        </Border>
+
+        <TextBlock x:Name="StatusLine" Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="19"
+                   Foreground="{StaticResource MutedBrush}"/>
+
+        <Border x:Name="FoundPanel" Margin="0,12,0,0" Padding="12,9,12,10" CornerRadius="6" BorderThickness="1"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}" Visibility="Collapsed">
+            <DockPanel>
+                <Button DockPanel.Dock="Right" Content="导入这一份" MinWidth="96" Margin="12,0,0,0" VerticalAlignment="Center"
+                        Click="ImportFound_Click" ToolTip="导入下载文件夹里找到的这份导出"/>
+                <TextBlock x:Name="FoundText" TextWrapping="Wrap" LineHeight="19" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <DockPanel Margin="0,16,0,0">
+            <Button x:Name="RemoveButton" DockPanel.Dock="Left" Style="{StaticResource LinkButton}" VerticalAlignment="Center"
+                    Content="移除已导入的记录…" Visibility="Collapsed" Click="Remove_Click"
+                    ToolTip="删掉会话管家自己保存的这份副本；Google 那边的记录不受影响"/>
+            <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
+                <Button Content="选择导出文件…" IsDefault="True" MinWidth="120" Click="Choose_Click"
+                        Style="{StaticResource ClaudeButton}"/>
+                <Button Content="关闭" IsCancel="True" MinWidth="88" Margin="8,0,0,0"/>
+            </StackPanel>
+        </DockPanel>
+    </StackPanel>
+</Window>

@@ -1,0 +1,38 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- A packed copy's frame read whole lives outside the managed heap, handed back when the copy is closed. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClaudeLauncher.Core\ClaudeLauncher.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The tests write packed copies with small frames, to have many in a small file. -->
+    <InternalsVisibleTo Include="ClaudeLauncher.IntegrationTests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Bundled SQLite engine: no system-wide dependency to install or keep in sync. -->
+    <PackageReference Include="Microsoft.Data.Sqlite" Version="10.0.12" />
+    <!-- Zstandard, managed only: Codex records a maintenance tool compressed (rollout-*.jsonl.zst) stay readable. -->
+    <PackageReference Include="ZstdSharp.Port" Version="0.8.8" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Compiled in: the catalog can be created from a single-file build too (CatalogSchemaText). -->
+    <EmbeddedResource Include="Catalog\CatalogSchema.sql" LogicalName="CatalogSchema.sql" />
+    <!-- Also copied beside the test assemblies, which read it as a file. Never published. -->
+    <Content Include="Catalog\CatalogSchema.sql">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+      <CopyToPublishDirectory>Never</CopyToPublishDirectory>
+      <Link>CatalogSchema.sql</Link>
+    </Content>
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,34 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <AssemblyTitle>会话管家（Claude · ChatGPT）</AssemblyTitle>
+    <Product>Session Hub for Claude and ChatGPT</Product>
+    <!-- Third-party tool. Not an Anthropic or OpenAI product and never presented as one. -->
+    <Company>Independent third-party launcher</Company>
+    <Version>0.24.2</Version>
+    <!-- Deliberately not Claude's mark: this is a third-party tool and must not look official. -->
+    <ApplicationIcon>app.ico</ApplicationIcon>
+    <!-- Per-monitor DPI, Windows 10/11 compatibility, long paths. -->
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+    <!-- Program.Main, not the entry WPF generates: the headless kinds start without WPF. -->
+    <StartupObject>ClaudeLauncher.App.Program</StartupObject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Inside the assembly, so the window icon is there in a single-file build as well; the
+         executable carries the same icon for shortcuts (ApplicationIcon). -->
+    <Resource Include="app.ico" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ClaudeLauncher.Core\ClaudeLauncher.Core.csproj" />
+    <ProjectReference Include="..\ClaudeLauncher.Infrastructure\ClaudeLauncher.Infrastructure.csproj" />
+  </ItemGroup>
+
+
+</Project>

@@ -1,0 +1,300 @@
+<Window x:Class="ClaudeLauncher.App.AnalysisWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:local="clr-namespace:ClaudeLauncher.App"
+        Title="分析这条会话" Height="820" Width="1180" MinWidth="820" MinHeight="560"
+        Icon="app.ico"
+        WindowStartupLocation="Manual"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <Style x:Key="Card" TargetType="Border">
+            <Setter Property="Background" Value="{DynamicResource RaisedBrush}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource LineBrush}"/>
+            <Setter Property="BorderThickness" Value="1"/>
+            <Setter Property="CornerRadius" Value="6"/>
+            <Setter Property="Padding" Value="14,10,14,11"/>
+            <Setter Property="Margin" Value="0,0,10,10"/>
+        </Style>
+
+        <Style x:Key="CardLabel" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource MutedBrush}"/>
+            <Setter Property="FontSize" Value="12"/>
+        </Style>
+
+        <Style x:Key="CardValue" TargetType="TextBlock">
+            <Setter Property="FontSize" Value="22"/>
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,2,0,1"/>
+            <Setter Property="Text" Value="—"/>
+        </Style>
+
+        <Style x:Key="CardNote" TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{DynamicResource FaintBrush}"/>
+            <Setter Property="FontSize" Value="11.5"/>
+            <Setter Property="TextTrimming" Value="CharacterEllipsis"/>
+        </Style>
+
+        <Style x:Key="ListHeading" TargetType="TextBlock">
+            <Setter Property="FontWeight" Value="SemiBold"/>
+            <Setter Property="Margin" Value="0,0,0,10"/>
+        </Style>
+
+        <!-- A list's rows as they are: no selection, no focus box. -->
+        <Style x:Key="BareItem" TargetType="ListBoxItem">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A pause after which the cache had expired: when, how long, how much was written again. -->
+        <DataTemplate x:Key="RewriteTemplate">
+            <Grid Margin="0,0,4,9" Background="Transparent" ToolTip="{Binding Tip}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Margin="0,0,10,0" TextTrimming="CharacterEllipsis">
+                    <Run Text="{Binding When, Mode=OneWay}"/><Run Text="{Binding Gap, Mode=OneWay}" FontSize="11.5"
+                                                               Foreground="{DynamicResource FaintBrush}"/>
+                </TextBlock>
+                <TextBlock Grid.Column="1" Text="{Binding Tokens}" FontWeight="SemiBold" Foreground="{DynamicResource WarnBrush}"/>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Model}" FontSize="11.5" Margin="0,2,0,0"
+                           Foreground="{DynamicResource FaintBrush}" TextTrimming="CharacterEllipsis"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- A tool: how often, how much its results put into the context, and its share of the largest. -->
+        <DataTemplate x:Key="ToolTemplate">
+            <Grid Margin="0,0,4,10" Background="Transparent" ToolTip="{Binding Tip}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Margin="0,0,10,0" TextTrimming="CharacterEllipsis">
+                    <Run Text="{Binding Name, Mode=OneWay}"/><Run Text="{Binding Count, Mode=OneWay}" FontSize="11.5"
+                                                               Foreground="{DynamicResource FaintBrush}"/>
+                </TextBlock>
+                <TextBlock Grid.Column="1" Text="{Binding Size}" FontWeight="SemiBold"/>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Detail}" FontSize="11.5" Margin="0,2,0,0"
+                           Foreground="{DynamicResource FaintBrush}" TextTrimming="CharacterEllipsis"/>
+                <Grid Grid.Row="2" Grid.ColumnSpan="2" Height="4" Margin="0,4,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="{Binding Bar}"/>
+                        <ColumnDefinition Width="{Binding Rest}"/>
+                    </Grid.ColumnDefinitions>
+                    <Border CornerRadius="2" Background="{DynamicResource InfoBrush}"/>
+                </Grid>
+            </Grid>
+        </DataTemplate>
+
+        <!-- One thing the numbers say. -->
+        <DataTemplate x:Key="TipTemplate">
+            <DockPanel Margin="0,0,4,10">
+                <TextBlock DockPanel.Dock="Left" Text="·" FontWeight="Bold" Margin="0,0,8,0" Foreground="{DynamicResource InfoBrush}"/>
+                <TextBox Text="{Binding Mode=OneWay}" Style="{StaticResource SelectableText}"/>
+            </DockPanel>
+        </DataTemplate>
+
+        <Style x:Key="Legend" TargetType="Border">
+            <Setter Property="Width" Value="10"/>
+            <Setter Property="Height" Value="10"/>
+            <Setter Property="CornerRadius" Value="2"/>
+            <Setter Property="Margin" Value="14,0,5,0"/>
+        </Style>
+    </Window.Resources>
+
+    <!-- The page fills the window; once the lists show, a window too short to leave them some height scrolls (Body.MinHeight). -->
+    <ScrollViewer VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled" Focusable="False">
+        <Border x:Name="Body" Padding="20,16,20,14"
+                Height="{Binding ViewportHeight, RelativeSource={RelativeSource AncestorType=ScrollViewer}}">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="*"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+
+                <TextBlock x:Name="TitleLine" FontSize="18" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <TextBlock x:Name="SummaryLine" Grid.Row="1" Style="{StaticResource Muted}" FontSize="12.5" Margin="0,4,0,12"
+                           TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite" Text="正在读取对话记录…"/>
+
+                <!-- ========================================================== cards -->
+                <UniformGrid x:Name="Cards" Grid.Row="2" Columns="5" Margin="0,0,-10,4" Visibility="Collapsed">
+                    <Border Style="{StaticResource Card}" ToolTip="模型被调用了多少次：主线和子代理、子任务一起算">
+                        <StackPanel>
+                            <TextBlock Text="调用" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="CallsValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock x:Name="CallsNote" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" ToolTip="输入、缓存读取、缓存写入、输出加在一起">
+                        <StackPanel>
+                            <TextBlock Text="合计" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="TotalValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock Text="token，读入加输出" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" ToolTip="读入最多的那一次调用：上下文 = 输入 + 缓存写入 + 缓存读取">
+                        <StackPanel>
+                            <TextBlock Text="最大上下文" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="MaxValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock x:Name="MaxNote" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" ToolTip="每次调用平均读入的上下文。会话越长越大，越贵也越慢">
+                        <StackPanel>
+                            <TextBlock Text="每次上下文" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="AverageValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock Text="每次调用平均读入" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" ToolTip="读入的上下文里从缓存读取的比例；缓存读取的价格只有新输入的一小部分">
+                        <StackPanel>
+                            <TextBlock Text="缓存命中" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="HitValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock x:Name="HitNote" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="RewritesCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="缓存过期后重写" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="RewritesValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock x:Name="RewritesNote" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border x:Name="CompactionsCard" Style="{StaticResource Card}">
+                        <StackPanel>
+                            <TextBlock Text="压缩" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="CompactionsValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock x:Name="CompactionsNote" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" ToolTip="从第一次调用到最后一次调用，中间的停顿也算在内">
+                        <StackPanel>
+                            <TextBlock Text="持续" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="DurationValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock x:Name="DurationNote" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}" ToolTip="模型写出的内容，含思考 / 推理">
+                        <StackPanel>
+                            <TextBlock Text="输出" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="OutputValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock Text="含思考 / 推理" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                    <Border Style="{StaticResource Card}"
+                            ToolTip="工具结果写进记录的字节数，按 3.5 字节约 1 token 估算，不是模型记下的数。Claude Code 在每个结果旁另存的一份副本（模型看不到）不算在内">
+                        <StackPanel>
+                            <TextBlock Text="工具结果" Style="{StaticResource CardLabel}"/>
+                            <TextBlock x:Name="ToolsValue" Style="{StaticResource CardValue}"/>
+                            <TextBlock x:Name="ToolsNote" Style="{StaticResource CardNote}"/>
+                        </StackPanel>
+                    </Border>
+                </UniformGrid>
+
+                <!-- ========================================================== chart -->
+                <Border x:Name="ChartSection" Grid.Row="3" Style="{StaticResource Card}" Margin="0,0,0,14" Visibility="Collapsed">
+                    <DockPanel>
+                        <DockPanel DockPanel.Dock="Top" Margin="0,0,0,10">
+                            <StackPanel DockPanel.Dock="Right" Orientation="Horizontal" VerticalAlignment="Center">
+                                <Border Style="{StaticResource Legend}" Background="{DynamicResource InfoBrush}"/>
+                                <TextBlock Text="缓存读取" FontSize="12"/>
+                                <Border Style="{StaticResource Legend}" Background="{DynamicResource MutedBrush}"/>
+                                <TextBlock Text="新读入" FontSize="12" ToolTip="输入加缓存写入：没有从缓存读取的部分"/>
+                                <Border Style="{StaticResource Legend}" Background="{DynamicResource WarnBrush}"/>
+                                <TextBlock Text="缓存过期后重写" FontSize="12"/>
+                                <Path Data="M 0,0 L 8,0 L 4,6 Z" Fill="{DynamicResource ErrorBrush}" Margin="14,0,5,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="压缩" FontSize="12"/>
+                                <Border Style="{StaticResource Legend}" Height="4" Background="{DynamicResource FaintBrush}"/>
+                                <TextBlock Text="长时间停顿" FontSize="12" ToolTip="距上一次调用超过了缓存保留的时间"/>
+                            </StackPanel>
+                            <TextBlock DockPanel.Dock="Left" Text="每次调用的上下文" FontWeight="SemiBold" VerticalAlignment="Center"/>
+                            <ComboBox x:Name="SeriesBox" DockPanel.Dock="Left" Style="{StaticResource DarkComboBox}" Margin="12,0,0,0"
+                                      MinWidth="200" MaxWidth="360" SelectionChanged="Series_SelectionChanged" Visibility="Collapsed"
+                                      AutomationProperties.Name="看哪一条线"
+                                      ToolTip="主线、每个子代理或子任务各有自己的缓存，分开画"/>
+                            <TextBlock x:Name="ChartNote" Style="{StaticResource Muted}" Margin="12,1,12,0" VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"/>
+                        </DockPanel>
+                        <local:ContextChart x:Name="Chart" Height="150" AutomationProperties.Name="每次调用的上下文"/>
+                    </DockPanel>
+                </Border>
+
+                <!-- ========================================================== lists -->
+                <Grid x:Name="Lists" Grid.Row="4" Margin="0,0,-10,0" Visibility="Collapsed">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="1.2*"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="1.1*"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Style="{StaticResource Card}" Margin="0,0,10,0">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="从数字里看到的" Style="{StaticResource ListHeading}"/>
+                            <ListBox x:Name="TipList" ItemTemplate="{StaticResource TipTemplate}" ItemContainerStyle="{StaticResource BareItem}"
+                                     Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch"
+                                     ScrollViewer.HorizontalScrollBarVisibility="Disabled" AutomationProperties.Name="从数字里看到的"/>
+                        </DockPanel>
+                    </Border>
+                    <Border Grid.Column="1" Style="{StaticResource Card}" Margin="0,0,10,0">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="缓存过期后重写" Style="{StaticResource ListHeading}"
+                                       ToolTip="离开超过缓存保留的时间（5 分钟；Claude 写的是 1 小时缓存时按 1 小时）后继续，缓存已经没了：这次调用把整段上下文重新写进缓存（Claude），或按全价重新读入（其他应用）"/>
+                            <Grid>
+                                <ListBox x:Name="RewriteList" ItemTemplate="{StaticResource RewriteTemplate}"
+                                         ItemContainerStyle="{StaticResource BareItem}" Background="Transparent" BorderThickness="0"
+                                         HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         VirtualizingStackPanel.IsVirtualizing="True" AutomationProperties.Name="缓存过期后重写"/>
+                                <TextBlock x:Name="NoRewrites" Style="{StaticResource Muted}" TextWrapping="Wrap" Visibility="Collapsed"
+                                           Text="没有发现缓存过期后的重写：每次停顿都没超过缓存保留的时间，或者停顿后上下文还很小。"/>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                    <Border Grid.Column="2" Style="{StaticResource Card}" Margin="0,0,10,0">
+                        <DockPanel>
+                            <TextBlock DockPanel.Dock="Top" Text="哪些工具往上下文里放得最多" Style="{StaticResource ListHeading}"
+                                       ToolTip="按工具结果写进记录的字节数排；token 是按 3.5 字节约 1 token 估算的"/>
+                            <Grid>
+                                <ListBox x:Name="ToolList" ItemTemplate="{StaticResource ToolTemplate}"
+                                         ItemContainerStyle="{StaticResource BareItem}" Background="Transparent" BorderThickness="0"
+                                         HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                                         VirtualizingStackPanel.IsVirtualizing="True" AutomationProperties.Name="哪些工具往上下文里放得最多"/>
+                                <TextBlock x:Name="NoTools" Style="{StaticResource Muted}" TextWrapping="Wrap" Visibility="Collapsed"
+                                           Text="记录里没有工具结果。"/>
+                            </Grid>
+                        </DockPanel>
+                    </Border>
+                </Grid>
+
+                <TextBlock x:Name="EmptyText" Grid.Row="2" Grid.RowSpan="3" HorizontalAlignment="Center" VerticalAlignment="Center"
+                           TextWrapping="Wrap" TextAlignment="Center" MaxWidth="480" Style="{StaticResource Muted}" FontSize="13"
+                           Visibility="Collapsed"/>
+
+                <TextBlock Grid.Row="5" Margin="2,12,0,0" TextWrapping="Wrap" FontSize="12" LineHeight="18"
+                           Foreground="{StaticResource FaintBrush}"
+                           Text="读自这条会话的对话记录（子代理、子任务的记录也在内，各自的缓存分开算），打开时读一遍，关掉窗口就不再占内存。上下文 = 输入 + 缓存写入 + 缓存读取。「缓存过期后重写」：离上一次调用超过缓存保留的时间、模型没换、上一次上下文至少 2 万，而这次从缓存读到的不到一半。「压缩」：应用记下的压缩，或上下文一下子少了一半以上（之前至少 3 万）。工具结果的 token 按字节数估算。"/>
+            </Grid>
+        </Border>
+    </ScrollViewer>
+</Window>

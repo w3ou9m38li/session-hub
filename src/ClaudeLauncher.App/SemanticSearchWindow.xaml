@@ -1,0 +1,132 @@
+<Window x:Class="ClaudeLauncher.App.SemanticSearchWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="按意思找 · 会话管家" Height="720" Width="880" MinWidth="560" MinHeight="420"
+        Icon="app.ico"
+        WindowStartupLocation="Manual"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <!-- A conversation found: its title, app and time, how close it came, and the piece of it that came closest. -->
+        <DataTemplate x:Key="ResultTemplate">
+            <Grid Margin="2,1,2,3" ToolTip="{Binding Tip}">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock Text="{Binding Title}" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"/>
+                <StackPanel Grid.Column="1" Orientation="Horizontal" Margin="14,0,0,0" VerticalAlignment="Center">
+                    <TextBlock Text="{Binding App}" Foreground="{Binding AppBrush}" FontSize="12"/>
+                    <TextBlock Text="{Binding Time}" Foreground="{DynamicResource FaintBrush}" FontSize="12" Margin="10,0,0,0"/>
+                    <!-- How close, against the closest found: a short bar; the number is in its tip. -->
+                    <Grid Width="56" Height="4" Margin="12,1,0,0" VerticalAlignment="Center" Background="{DynamicResource LineBrush}"
+                          ToolTip="{Binding ScoreTip}">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="{Binding Bar}"/>
+                            <ColumnDefinition Width="{Binding Rest}"/>
+                        </Grid.ColumnDefinitions>
+                        <Border Background="{DynamicResource InfoBrush}"/>
+                    </Grid>
+                </StackPanel>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Margin="0,4,0,0" TextWrapping="Wrap" MaxHeight="58"
+                           TextTrimming="CharacterEllipsis" FontSize="12.5" Foreground="{DynamicResource DetailTextBrush}">
+                    <Run Text="{Binding Who, Mode=OneWay}" Foreground="{DynamicResource FaintBrush}"/><Run Text="{Binding Snippet, Mode=OneWay}"/>
+                </TextBlock>
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="20,16,20,14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ========================================================== query -->
+        <DockPanel>
+            <Button x:Name="SearchButton" DockPanel.Dock="Right" Padding="14,6" Margin="10,0,0,0" Click="Search_Click"
+                    AutomationProperties.Name="按意思找" ToolTip="按意思找（Enter）">
+                <StackPanel Orientation="Horizontal">
+                    <TextBlock Style="{StaticResource IconGlyph}" Text="&#xE721;" Margin="0,0,7,0"/>
+                    <TextBlock Text="找"/>
+                </StackPanel>
+            </Button>
+            <Grid>
+                <TextBox x:Name="QueryBox" Padding="8,6" VerticalContentAlignment="Center" MaxLength="500"
+                         PreviewKeyDown="QueryBox_PreviewKeyDown" TextChanged="QueryBox_TextChanged"
+                         AutomationProperties.Name="想找的意思"/>
+                <TextBlock x:Name="QueryHint" IsHitTestVisible="False" Margin="11,0,0,0" VerticalAlignment="Center"
+                           Foreground="{StaticResource FaintBrush}" TextTrimming="CharacterEllipsis"
+                           Text="用一句话说想找什么，比如「上次讨论引物怎么设计的那次」，不必是原话"/>
+            </Grid>
+        </DockPanel>
+
+        <TextBlock x:Name="StatusText" Grid.Row="1" Style="{StaticResource Muted}" FontSize="12.5" Margin="2,9,0,10"
+                   TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite" Text="正在读取语义索引…"/>
+
+        <!-- ======================================================== results -->
+        <Border Grid.Row="2" Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource LineBrush}"
+                BorderThickness="1" CornerRadius="6">
+            <Grid>
+                <ListBox x:Name="Results" ItemTemplate="{StaticResource ResultTemplate}" Background="Transparent"
+                         BorderThickness="0" Padding="0,4" HorizontalContentAlignment="Stretch"
+                         ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                         VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                         VirtualizingPanel.ScrollUnit="Pixel"
+                         MouseDoubleClick="Results_MouseDoubleClick" PreviewKeyDown="Results_PreviewKeyDown"
+                         AutomationProperties.Name="找到的对话" Visibility="Collapsed">
+                    <ListBox.ItemContainerStyle>
+                        <Style TargetType="ListBoxItem">
+                            <Setter Property="Foreground" Value="{StaticResource TextBrush}"/>
+                            <Setter Property="Padding" Value="11,8"/>
+                            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                            <Setter Property="FocusVisualStyle" Value="{x:Null}"/>
+                            <Setter Property="AutomationProperties.Name" Value="{Binding Title}"/>
+                            <Setter Property="Template">
+                                <Setter.Value>
+                                    <ControlTemplate TargetType="ListBoxItem">
+                                        <Border x:Name="Bd" Background="Transparent" Padding="{TemplateBinding Padding}"
+                                                CornerRadius="4" Margin="4,1">
+                                            <ContentPresenter/>
+                                        </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource DialogRowHoverBrush}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsSelected" Value="True">
+                                                <Setter TargetName="Bd" Property="Background" Value="{StaticResource SelectionBrush}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
+                                    </ControlTemplate>
+                                </Setter.Value>
+                            </Setter>
+                        </Style>
+                    </ListBox.ItemContainerStyle>
+                </ListBox>
+
+                <!-- Before a search, when nothing is found, and when something is missing: what and why. -->
+                <StackPanel x:Name="EmptyPanel" VerticalAlignment="Center" HorizontalAlignment="Center" MaxWidth="560"
+                            Margin="24">
+                    <TextBlock x:Name="EmptyTitle" FontSize="15" FontWeight="SemiBold" TextAlignment="Center"
+                               TextWrapping="Wrap" Text="输入一句话，按 Enter"/>
+                    <TextBox x:Name="EmptyDetail" Style="{StaticResource SelectableText}" Margin="0,8,0,0" FontSize="12.5"
+                             Foreground="{StaticResource MutedBrush}" TextAlignment="Center" TextWrapping="Wrap"
+                             Text="按意思找意思相近的对话：不必记得原话，换个说法也能找到"/>
+                    <Button x:Name="EmptyAction" Style="{StaticResource LinkButton}" HorizontalAlignment="Center"
+                            Margin="0,10,0,0" Visibility="Collapsed" Click="EmptyAction_Click"/>
+                </StackPanel>
+            </Grid>
+        </Border>
+
+        <TextBlock Grid.Row="3" Margin="2,10,0,0" TextWrapping="Wrap" FontSize="12" Foreground="{StaticResource FaintBrush}"
+                   Text="双击或按 Enter 在列表中定位这条对话，Ctrl+Enter 打开对话记录。结果按意思的接近程度排，是近似的；要找确切的字词，用主窗口的搜索框。"/>
+    </Grid>
+</Window>

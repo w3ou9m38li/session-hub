@@ -1,0 +1,220 @@
+<Window x:Class="ClaudeLauncher.App.CompareWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="会话对比" Height="800" Width="1240" MinWidth="820" MinHeight="480"
+        Icon="app.ico"
+        WindowStartupLocation="Manual"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <Window.Resources>
+        <BooleanToVisibilityConverter x:Key="BoolToVis"/>
+
+        <!-- Rows are read, not selected: no highlight, no focus stop. -->
+        <Style x:Key="BareItem" TargetType="ListBoxItem">
+            <Setter Property="Focusable" Value="False"/>
+            <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ListBoxItem">
+                        <ContentPresenter/>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- A side's heading: which app, the title, where and when, and what it amounted to. -->
+        <DataTemplate x:Key="HeaderTemplate">
+            <Border Background="{DynamicResource RaisedBrush}" BorderBrush="{DynamicResource LineBrush}" BorderThickness="1"
+                    CornerRadius="6" Padding="14,10,14,11">
+                <StackPanel>
+                    <DockPanel>
+                        <Border DockPanel.Dock="Left" Background="{Binding Badge}" CornerRadius="3" Padding="6,1,6,2"
+                                Margin="0,0,8,0" VerticalAlignment="Center">
+                            <TextBlock Text="{Binding Source}" FontSize="11.5" Foreground="{DynamicResource OnAccentTextBrush}"/>
+                        </Border>
+                        <TextBlock DockPanel.Dock="Right" Text="{Binding Side}" FontSize="11.5" Margin="10,0,0,0"
+                                   VerticalAlignment="Center" Foreground="{DynamicResource FaintBrush}"/>
+                        <TextBlock Text="{Binding Title}" FontSize="14" FontWeight="SemiBold" TextTrimming="CharacterEllipsis"
+                                   ToolTip="{Binding Title}"/>
+                    </DockPanel>
+                    <TextBlock Text="{Binding Project}" Margin="0,7,0,0" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Project}"/>
+                    <TextBlock Text="{Binding Times}" Margin="0,3,0,0" FontSize="12" Foreground="{DynamicResource MutedBrush}"
+                               TextTrimming="CharacterEllipsis" ToolTip="{Binding Times}"/>
+                    <TextBlock Text="{Binding Amounts}" Margin="0,3,0,0" FontSize="12" TextTrimming="CharacterEllipsis"
+                               ToolTip="{Binding AmountsTip}"/>
+                </StackPanel>
+            </Border>
+        </DataTemplate>
+
+        <!-- One side of a row: the prompt and the answer it got — or, when this side never asked it, a note saying so. -->
+        <DataTemplate x:Key="TurnTemplate">
+            <Grid>
+                <Border x:Name="Card" Background="{DynamicResource SurfaceBrush}" BorderBrush="{Binding Stripe}"
+                        BorderThickness="3,0,0,0" CornerRadius="0,4,4,0" Padding="12,8,12,10">
+                    <StackPanel>
+                        <TextBlock Text="{Binding Heading}" FontSize="11.5" Foreground="{DynamicResource FaintBrush}"/>
+                        <TextBox Style="{StaticResource SelectableText}" Text="{Binding Prompt, Mode=OneWay}" Margin="0,3,0,0"/>
+                        <Button Style="{StaticResource LinkButton}" Content="{Binding PromptToggle}" Click="TogglePrompt_Click"
+                                HorizontalAlignment="Left" Margin="0,4,0,0"
+                                Visibility="{Binding PromptCut, Converter={StaticResource BoolToVis}}"/>
+                        <Border Margin="0,8,0,0" Padding="10,6,10,8" CornerRadius="4" Background="{DynamicResource AssistantBubbleBrush}">
+                            <StackPanel>
+                                <TextBlock Text="{Binding AnswerHeading}" FontSize="11.5" Foreground="{DynamicResource FaintBrush}"
+                                           TextTrimming="CharacterEllipsis"/>
+                                <TextBox Style="{StaticResource SelectableText}" Text="{Binding Answer, Mode=OneWay}" Margin="0,3,0,0"
+                                         Foreground="{DynamicResource DetailTextBrush}" FontSize="12.5"/>
+                                <Button Style="{StaticResource LinkButton}" Content="{Binding AnswerToggle}" Click="ToggleAnswer_Click"
+                                        HorizontalAlignment="Left" Margin="0,4,0,0"
+                                        Visibility="{Binding AnswerCut, Converter={StaticResource BoolToVis}}"/>
+                            </StackPanel>
+                        </Border>
+                    </StackPanel>
+                </Border>
+                <TextBlock x:Name="Missing" Text="{Binding Missing}" Visibility="Collapsed" FontSize="12"
+                           Foreground="{DynamicResource FaintBrush}" HorizontalAlignment="Center" VerticalAlignment="Center" Margin="12"/>
+            </Grid>
+            <DataTemplate.Triggers>
+                <DataTrigger Binding="{Binding HasTurn}" Value="False">
+                    <Setter TargetName="Card" Property="Visibility" Value="Collapsed"/>
+                    <Setter TargetName="Missing" Property="Visibility" Value="Visible"/>
+                </DataTrigger>
+            </DataTemplate.Triggers>
+        </DataTemplate>
+
+        <!-- A row: the left turn, how alike the prompts are, the right turn. -->
+        <DataTemplate x:Key="RowTemplate">
+            <Grid Margin="0,0,0,8">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <ContentPresenter Content="{Binding A}" ContentTemplate="{StaticResource TurnTemplate}"/>
+                <TextBlock Grid.Column="1" Text="{Binding Marker}" Foreground="{Binding MarkerBrush}" ToolTip="{Binding MarkerTip}"
+                           FontSize="12" TextAlignment="Center" TextWrapping="Wrap" HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                <ContentPresenter Grid.Column="2" Content="{Binding B}" ContentTemplate="{StaticResource TurnTemplate}"/>
+            </Grid>
+        </DataTemplate>
+
+        <!-- A changed file: where it is, how much, and — for one both sides changed — each side's share. -->
+        <DataTemplate x:Key="FileTemplate">
+            <Grid Margin="2,4,6,4" ToolTip="{Binding Tip}" Background="Transparent">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/>
+                    <RowDefinition Height="Auto"/>
+                </Grid.RowDefinitions>
+                <TextBlock TextTrimming="CharacterEllipsis" Margin="0,0,8,0">
+                    <Run Text="{Binding Name, Mode=OneWay}"/><Run Text="{Binding Tag, Mode=OneWay}" FontSize="11"
+                         Foreground="{DynamicResource InfoBrush}"/>
+                </TextBlock>
+                <TextBlock Grid.Column="1" FontFamily="{StaticResource MonoFont}" FontSize="12">
+                    <Run Text="{Binding Added, Mode=OneWay}" Foreground="{DynamicResource DiffAddTextBrush}"/><Run
+                         Text=" "/><Run Text="{Binding Removed, Mode=OneWay}" Foreground="{DynamicResource DiffRemoveTextBrush}"/>
+                </TextBlock>
+                <TextBlock Grid.Row="1" Grid.ColumnSpan="2" Text="{Binding Detail}" FontSize="11.5" Margin="0,2,0,0"
+                           Foreground="{DynamicResource FaintBrush}" TextTrimming="CharacterEllipsis"
+                           Visibility="{Binding HasDetail, Converter={StaticResource BoolToVis}}"/>
+            </Grid>
+        </DataTemplate>
+    </Window.Resources>
+
+    <Grid Margin="20,16,20,14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="Auto"/>
+            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/>
+        </Grid.RowDefinitions>
+
+        <!-- ======================================================== the two sides -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*"/>
+                <ColumnDefinition Width="64"/>
+                <ColumnDefinition Width="*"/>
+            </Grid.ColumnDefinitions>
+            <ContentControl x:Name="HeaderA" ContentTemplate="{StaticResource HeaderTemplate}" Focusable="False"/>
+            <TextBlock Grid.Column="1" Style="{StaticResource IconGlyph}" Text="&#xE8AB;" FontSize="16"
+                       Foreground="{StaticResource FaintBrush}" HorizontalAlignment="Center"/>
+            <ContentControl x:Name="HeaderB" Grid.Column="2" ContentTemplate="{StaticResource HeaderTemplate}" Focusable="False"/>
+        </Grid>
+
+        <DockPanel Grid.Row="1" Margin="0,12,0,10">
+            <Border DockPanel.Dock="Right" Background="{StaticResource RaisedBrush}" CornerRadius="6" Padding="3"
+                    BorderBrush="{StaticResource LineBrush}" BorderThickness="1">
+                <StackPanel Orientation="Horizontal">
+                    <RadioButton x:Name="TurnsView" Style="{StaticResource SegmentButton}" GroupName="View" IsChecked="True"
+                                 Content="提问对齐" Checked="View_Checked"/>
+                    <RadioButton x:Name="FilesView" Style="{StaticResource SegmentButton}" GroupName="View" IsEnabled="False"
+                                 Content="改动的文件" Checked="View_Checked" ToolTipService.ShowOnDisabled="True"/>
+                </StackPanel>
+            </Border>
+            <CheckBox x:Name="OnlyDifferent" DockPanel.Dock="Right" Content="只看对不上的" Margin="0,0,16,0"
+                      VerticalAlignment="Center" Checked="OnlyDifferent_Changed" Unchecked="OnlyDifferent_Changed"
+                      ToolTip="藏起两边完全相同的提问，只留相近的和只有一边问过的"/>
+            <TextBlock x:Name="SummaryLine" Style="{StaticResource Muted}" FontSize="12.5" VerticalAlignment="Center"
+                       Margin="0,0,12,0" TextTrimming="CharacterEllipsis" AutomationProperties.LiveSetting="Polite"
+                       Text="正在读取两段对话…"/>
+        </DockPanel>
+
+        <!-- ============================================================ content -->
+        <Grid Grid.Row="2">
+            <!-- Virtualised: two long conversations must not realise every turn. Scrolled by pixel:
+                 a turn a screen tall must not jump past in one notch of the wheel. -->
+            <ListBox x:Name="TurnList" ItemTemplate="{StaticResource RowTemplate}" ItemContainerStyle="{StaticResource BareItem}"
+                     Background="Transparent" BorderThickness="0" HorizontalContentAlignment="Stretch"
+                     VirtualizingPanel.IsVirtualizing="True" VirtualizingPanel.VirtualizationMode="Recycling"
+                     VirtualizingPanel.ScrollUnit="Pixel" ScrollViewer.CanContentScroll="True"
+                     ScrollViewer.PanningMode="VerticalOnly" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                     AutomationProperties.Name="对齐的提问"/>
+
+            <Grid x:Name="FilesPanel" Visibility="Collapsed">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="12"/>
+                    <ColumnDefinition Width="*"/>
+                </Grid.ColumnDefinitions>
+                <DockPanel>
+                    <TextBlock x:Name="OnlyAHeading" DockPanel.Dock="Top" FontWeight="SemiBold" Margin="2,0,0,4"/>
+                    <TextBlock x:Name="OnlyANote" DockPanel.Dock="Top" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="2,0,0,6"/>
+                    <ListBox x:Name="OnlyAList" ItemTemplate="{StaticResource FileTemplate}" ItemContainerStyle="{StaticResource BareItem}"
+                             HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" AutomationProperties.Name="只在左边改过的文件"
+                             Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="6,4"/>
+                </DockPanel>
+                <DockPanel Grid.Column="2">
+                    <TextBlock x:Name="OnlyBHeading" DockPanel.Dock="Top" FontWeight="SemiBold" Margin="2,0,0,4"/>
+                    <TextBlock x:Name="OnlyBNote" DockPanel.Dock="Top" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="2,0,0,6"/>
+                    <ListBox x:Name="OnlyBList" ItemTemplate="{StaticResource FileTemplate}" ItemContainerStyle="{StaticResource BareItem}"
+                             HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" AutomationProperties.Name="只在右边改过的文件"
+                             Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="6,4"/>
+                </DockPanel>
+                <DockPanel Grid.Column="4">
+                    <TextBlock x:Name="BothHeading" DockPanel.Dock="Top" FontWeight="SemiBold" Margin="2,0,0,4"/>
+                    <TextBlock x:Name="BothNote" DockPanel.Dock="Top" Style="{StaticResource Muted}" TextWrapping="Wrap" Margin="2,0,0,6"/>
+                    <ListBox x:Name="BothList" ItemTemplate="{StaticResource FileTemplate}" ItemContainerStyle="{StaticResource BareItem}"
+                             HorizontalContentAlignment="Stretch" ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                             VirtualizingPanel.IsVirtualizing="True" AutomationProperties.Name="两边都改过的文件"
+                             Background="{StaticResource RaisedBrush}" BorderBrush="{StaticResource LineBrush}" BorderThickness="1" Padding="6,4"/>
+                </DockPanel>
+            </Grid>
+
+            <TextBlock x:Name="EmptyText" HorizontalAlignment="Center" VerticalAlignment="Center" TextWrapping="Wrap"
+                       TextAlignment="Center" MaxWidth="460" Style="{StaticResource Muted}" FontSize="13" Visibility="Collapsed"/>
+        </Grid>
+
+        <TextBlock x:Name="FooterLine" Grid.Row="3" Margin="2,12,0,0" TextWrapping="Wrap" FontSize="12"
+                   Foreground="{StaticResource FaintBrush}"
+                   Text="只比较对话：你的提问和助手的回答，工具调用和输出不比较。续接或分叉出来的会话只算它自己的那部分，复制来的历史算在原会话里。"/>
+    </Grid>
+</Window>

@@ -1,0 +1,89 @@
+<Window x:Class="ClaudeLauncher.App.McpDialog"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="让 Claude / Codex 查历史（MCP）" Width="660" SizeToContent="Height" MinWidth="480"
+        WindowStartupLocation="CenterOwner" ResizeMode="NoResize" ShowInTaskbar="False"
+        Background="{StaticResource WindowBrush}" Foreground="{StaticResource TextBrush}"
+        FontFamily="Microsoft YaHei UI, Segoe UI" FontSize="13"
+        UseLayoutRounding="True" TextOptions.TextFormattingMode="Display">
+
+    <StackPanel Margin="20,18,20,16">
+        <TextBlock FontSize="15" FontWeight="SemiBold" TextWrapping="Wrap"
+                   Text="让 Claude Code、Codex 查你的历史对话"/>
+        <TextBlock Margin="0,6,0,0" TextWrapping="Wrap" LineHeight="20" Foreground="{StaticResource SubtleTextBrush}"
+                   Text="把会话管家登记成它们的 MCP 服务后，Claude Code、Codex 和 Claude 桌面版就能搜索、列出、阅读你在这台电脑上的历史对话，也能看 token 用量。每个智能体会自己启动一个会话管家进程（--mcp）：不开窗口、只读、什么都不改，对这个窗口没有影响；读到的是这个窗口上次同步时的内容。"/>
+
+        <Border Margin="0,14,0,0" Padding="16,12,16,12" CornerRadius="6" BorderThickness="1"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}">
+            <StackPanel>
+                <TextBlock Text="程序位置" FontWeight="SemiBold"/>
+                <TextBox x:Name="ExePath" Margin="0,6,0,0" Style="{StaticResource SelectableText}"
+                         AutomationProperties.Name="会话管家程序的完整路径"/>
+                <TextBlock x:Name="PathNote" Margin="0,6,0,0" TextWrapping="Wrap" LineHeight="19"
+                           Foreground="{StaticResource MutedBrush}"/>
+            </StackPanel>
+        </Border>
+
+        <Border Margin="0,10,0,0" Padding="16,12,16,14" CornerRadius="6" BorderThickness="1"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="复制" MinWidth="72" Margin="12,0,0,0" VerticalAlignment="Center"
+                            Tag="{Binding ElementName=ClaudeCodeSnippet}" Click="Copy_Click"
+                            AutomationProperties.Name="复制 Claude Code 的命令"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="Claude Code" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                                   Text="在终端里运行一次这条命令；对你的所有项目都有效。"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBox x:Name="ClaudeCodeSnippet" Margin="0,8,0,0" Style="{StaticResource DetailText}"
+                         AutomationProperties.Name="Claude Code 的命令"/>
+            </StackPanel>
+        </Border>
+
+        <Border Margin="0,10,0,0" Padding="16,12,16,14" CornerRadius="6" BorderThickness="1"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="复制" MinWidth="72" Margin="12,0,0,0" VerticalAlignment="Center"
+                            Tag="{Binding ElementName=CodexSnippet}" Click="Copy_Click"
+                            AutomationProperties.Name="复制 Codex 的配置"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="Codex" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                                   Text="加到 %USERPROFILE%\.codex\config.toml 末尾（设了 CODEX_HOME 的，是那里的 config.toml）。"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBox x:Name="CodexSnippet" Margin="0,8,0,0" Style="{StaticResource DetailText}"
+                         AutomationProperties.Name="Codex 的配置"/>
+            </StackPanel>
+        </Border>
+
+        <Border Margin="0,10,0,0" Padding="16,12,16,14" CornerRadius="6" BorderThickness="1"
+                Background="{StaticResource SurfaceBrush}" BorderBrush="{StaticResource LineBrush}">
+            <StackPanel>
+                <DockPanel>
+                    <Button DockPanel.Dock="Right" Content="复制" MinWidth="72" Margin="12,0,0,0" VerticalAlignment="Center"
+                            Tag="{Binding ElementName=ClaudeDesktopSnippet}" Click="Copy_Click"
+                            AutomationProperties.Name="复制 Claude 桌面版的配置"/>
+                    <StackPanel VerticalAlignment="Center">
+                        <TextBlock Text="Claude 桌面版" FontWeight="SemiBold"/>
+                        <TextBlock Margin="0,2,0,0" TextWrapping="Wrap" Foreground="{StaticResource MutedBrush}"
+                                   Text="放进 claude_desktop_config.json 的 &quot;mcpServers&quot; 里（Claude 的 Settings → Developer → Edit Config 会打开它），然后重启 Claude。"/>
+                    </StackPanel>
+                </DockPanel>
+                <TextBox x:Name="ClaudeDesktopSnippet" Margin="0,8,0,0" Style="{StaticResource DetailText}"
+                         AutomationProperties.Name="Claude 桌面版的配置"/>
+            </StackPanel>
+        </Border>
+
+        <TextBlock x:Name="StatusLine" Margin="0,12,0,0" TextWrapping="Wrap" LineHeight="19"
+                   Foreground="{StaticResource MutedBrush}" AutomationProperties.LiveSetting="Polite"
+                   Text="会话管家不会改这些配置文件：复制后由你自己放进去。"/>
+
+        <StackPanel Margin="0,16,0,0" Orientation="Horizontal" HorizontalAlignment="Right">
+            <Button Content="完成" IsCancel="True" IsDefault="True" MinWidth="88"/>
+        </StackPanel>
+    </StackPanel>
+</Window>

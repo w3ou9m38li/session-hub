@@ -1,0 +1,13 @@
+# Build output
+bin/
+obj/
+.vs/
+*.user
+TestResults/
+
+# Published builds and share packages: rebuilt from source (README「构建」「分享给别人」)
+/artifacts/
+/dist/
+
+# The older 会话管家 project keeps its own git repository
+/Session-Hub/
